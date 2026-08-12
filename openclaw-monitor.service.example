@@ -1,0 +1,28 @@
+[Unit]
+Description=OpenClaw Monitor (supervision agents/tâches)
+After=network.target
+
+[Service]
+Type=simple
+# Remplacer __APP_DIR__ par le chemin absolu du dépôt et __NODE__ par le binaire node (>= 22).
+# `install.sh` génère ce fichier automatiquement.
+WorkingDirectory=__APP_DIR__
+Environment=NODE_ENV=production
+Environment=PORT=3200
+# Écoute sur la boucle locale par défaut : le tableau de bord expose le contenu des
+# demandes envoyées aux agents. Ne passer à 0.0.0.0 qu'en réseau de confiance.
+Environment=HOSTNAME=127.0.0.1
+Environment=NODE_OPTIONS=--max-old-space-size=320
+# Décommenter pour masquer tout contenu métier (captures d'écran, démonstrations) :
+# Environment=MONITOR_REDACT=1
+ExecStart=__NODE__ __APP_DIR__/.next/standalone/server.js
+Restart=always
+RestartSec=5
+# Garde-fous mémoire : utile sur une petite machine qui héberge déjà la gateway.
+MemoryHigh=400M
+MemoryMax=600M
+CPUWeight=30
+Nice=5
+
+[Install]
+WantedBy=default.target

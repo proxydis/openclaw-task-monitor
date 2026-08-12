@@ -1,0 +1,134 @@
+export type UnitState =
+  | 'running'   // travail en cours (process vivant)
+  | 'idle'      // session connue, rien en cours
+  | 'paused'    // suspendue (pause_reason / flow bloqué)
+  | 'done'      // terminée avec succès
+  | 'failed'    // échouée
+  | 'killed'    // tuée (timeout, OOM, cancel)
+  | 'scheduled' // planifiée (cron)
+  | 'unknown';
+
+export type Res = {
+  /** % d'un cœur (comme top). 100 = 1 cœur saturé */
+  cpuPct: number;
+  /** RSS en Mo */
+  rssMb: number;
+  /** nombre de process rattachés */
+  procs: number;
+};
+
+export const ZERO_RES: Res = { cpuPct: 0, rssMb: 0, procs: 0 };
+
+export type ProcInfo = {
+  pid: number;
+  ppid: number;
+  comm: string;
+  cmd: string;
+  cpuPct: number;
+  rssMb: number;
+  startedAt: number;
+  kind: 'gateway' | 'agent-cli' | 'mcp' | 'browser' | 'child' | 'other';
+  label: string;
+};
+
+export type TaskNode = {
+  id: string;
+  kind: 'task' | 'cron' | 'flow';
+  title: string;
+  detail: string;
+  state: UnitState;
+  stateLabel: string;
+  runtime: string;
+  createdAt: number | null;
+  startedAt: number | null;
+  endedAt: number | null;
+  durationMs: number | null;
+  summary: string | null;
+  error: string | null;
+  res: Res;
+  children: TaskNode[];
+};
+
+export type SessionNode = {
+  key: string;
+  sessionId: string | null;
+  kind: 'main' | 'subagent' | 'cron';
+  title: string;
+  subtitle: string;
+  channel: string | null;
+  state: UnitState;
+  stateLabel: string;
+  startedAt: number | null;
+  lastActivityAt: number | null;
+  model: string | null;
+  /** dernier prompt utilisateur, lu dans le transcript (aucun appel modèle) */
+  prompt: string | null;
+  turns: number;
+  res: Res;
+  pids: number[];
+  tasks: TaskNode[];
+  children: SessionNode[];
+};
+
+export type AgentNode = {
+  id: string;
+  name: string;
+  workspace: string | null;
+  model: string | null;
+  state: UnitState;
+  stateLabel: string;
+  res: Res;
+  lastActivityAt: number | null;
+  stats: {
+    liveSessions: number;
+    sessions: number;
+    subagents: number;
+    runningTasks: number;
+    tasks24h: number;
+    failed24h: number;
+  };
+  sessions: SessionNode[];
+};
+
+export type HostInfo = {
+  hostname: string;
+  cores: number;
+  cpuPct: number;
+  load: [number, number, number];
+  memTotalMb: number;
+  memUsedMb: number;
+  memAvailMb: number;
+  swapTotalMb: number;
+  swapUsedMb: number;
+  uptimeSec: number;
+};
+
+export type GatewayInfo = {
+  pid: number | null;
+  up: boolean;
+  uptimeSec: number | null;
+  res: Res;
+  port: number | null;
+  version: string | null;
+};
+
+export type Snapshot = {
+  ts: number;
+  collectMs: number;
+  host: HostInfo;
+  gateway: GatewayInfo;
+  agents: AgentNode[];
+  system: {
+    browser: Res;
+    other: Res;
+  };
+  totals: {
+    agents: number;
+    activeAgents: number;
+    liveSessions: number;
+    runningTasks: number;
+    subagentsLive: number;
+  };
+  procs: ProcInfo[];
+  warnings: string[];
+};
