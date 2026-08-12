@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build + installation du service utilisateur systemd.
-# Usage : ./install.sh [port]
+# Build + install of the systemd user service.
+# Usage: ./install.sh [port]
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -10,18 +10,18 @@ UNIT="$HOME/.config/systemd/user/openclaw-monitor.service"
 
 cd "$APP_DIR"
 
-echo "→ dépendances (typescript est nécessaire au build)"
+echo "→ dependencies (typescript is required by the build)"
 npm ci --no-audit --no-fund 2>/dev/null || npm install --no-audit --no-fund
 
 echo "→ build"
 NODE_OPTIONS="--max-old-space-size=1200" npx next build
 
-echo "→ bundle standalone"
+echo "→ standalone bundle"
 rm -rf .next/standalone/.next/static
 cp -r .next/static .next/standalone/.next/static
 [ -d public ] && cp -r public .next/standalone/public || true
 
-echo "→ unité systemd : $UNIT"
+echo "→ systemd unit: $UNIT"
 mkdir -p "$(dirname "$UNIT")"
 sed -e "s#__APP_DIR__#$APP_DIR#g" \
     -e "s#__NODE__#$NODE_BIN#g" \

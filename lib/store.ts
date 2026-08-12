@@ -165,7 +165,8 @@ export function readTranscript(file: string | null): Transcript {
         .replace(/\s+/g, ' ')
         .trim();
       if (!txt || txt.length < 3) continue;
-      data.prompt = REDACT ? `demande masquée (${txt.length} caractères)` : txt.slice(0, 600);
+      // placeholder interne : en mode démo, `redactSnapshot` remet ce champ à null de toute façon
+      data.prompt = REDACT ? `redacted prompt (${txt.length} chars)` : txt.slice(0, 600);
       data.promptAt = ts;
     }
   } catch {

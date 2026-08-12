@@ -200,3 +200,17 @@ table.procs tr:hover td { background: var(--panel-2); }
   background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.3); color: #fcd34d;
   border-radius: 8px; padding: 8px 12px; font-size: 12px; margin-bottom: 12px;
 }
+
+/* ---------------- sélecteur de langue ---------------- */
+.langsw {
+  display: flex; gap: 2px; padding: 2px; flex: none;
+  background: var(--bg-soft); border: 1px solid var(--line); border-radius: 8px;
+}
+.langsw-b {
+  background: transparent; border: 0; color: var(--txt-faint); cursor: pointer;
+  padding: 3px 9px; border-radius: 6px; font-size: 11px; font-weight: 600;
+  letter-spacing: .6px; font-family: var(--mono); line-height: 1.5;
+}
+.langsw-b:hover { color: var(--txt); }
+.langsw-b.on { color: var(--bg); background: var(--accent); }
+.langsw-b:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

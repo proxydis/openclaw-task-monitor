@@ -1,3 +1,14 @@
+/**
+ * Chaîne prête à afficher, ou message traduisible : `k` est une clé du catalogue
+ * (`lib/i18n.ts`), `p` les paramètres du gabarit, `ts` un horodatage rendu en heure
+ * locale et exposé au gabarit sous `{time}`.
+ *
+ * La collecte n'émet jamais de texte d'interface en dur : tout ce que le produit
+ * fabrique lui-même passe par une clé, tout ce qui vient des données OpenClaw
+ * (titres de tâches, noms de canaux, lignes de commande) reste une chaîne brute.
+ */
+export type Msg = string | { k: string; p?: Record<string, string | number>; ts?: number };
+
 export type UnitState =
   | 'running'   // travail en cours (process vivant)
   | 'idle'      // session connue, rien en cours
@@ -28,23 +39,22 @@ export type ProcInfo = {
   rssMb: number;
   startedAt: number;
   kind: 'gateway' | 'agent-cli' | 'mcp' | 'browser' | 'child' | 'other';
-  label: string;
+  label: Msg;
 };
 
 export type TaskNode = {
   id: string;
   kind: 'task' | 'cron' | 'flow';
-  title: string;
-  detail: string;
+  title: Msg;
+  detail: Msg;
   state: UnitState;
-  stateLabel: string;
-  runtime: string;
+  runtime: Msg;
   createdAt: number | null;
   startedAt: number | null;
   endedAt: number | null;
   durationMs: number | null;
-  summary: string | null;
-  error: string | null;
+  summary: Msg | null;
+  error: Msg | null;
   res: Res;
   children: TaskNode[];
 };
@@ -53,11 +63,10 @@ export type SessionNode = {
   key: string;
   sessionId: string | null;
   kind: 'main' | 'subagent' | 'cron';
-  title: string;
-  subtitle: string;
+  title: Msg;
+  subtitle: Msg;
   channel: string | null;
   state: UnitState;
-  stateLabel: string;
   startedAt: number | null;
   lastActivityAt: number | null;
   model: string | null;
@@ -76,7 +85,6 @@ export type AgentNode = {
   workspace: string | null;
   model: string | null;
   state: UnitState;
-  stateLabel: string;
   res: Res;
   lastActivityAt: number | null;
   stats: {
@@ -91,7 +99,7 @@ export type AgentNode = {
 };
 
 export type HostInfo = {
-  hostname: string;
+  hostname: Msg;
   cores: number;
   cpuPct: number;
   load: [number, number, number];
@@ -130,5 +138,5 @@ export type Snapshot = {
     subagentsLive: number;
   };
   procs: ProcInfo[];
-  warnings: string[];
+  warnings: Msg[];
 };

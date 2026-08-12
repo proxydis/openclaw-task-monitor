@@ -12,19 +12,8 @@ import {
   type SubagentRow,
   type TaskRow,
 } from './store';
-import type { AgentNode, ProcInfo, Res, SessionNode, Snapshot, TaskNode, UnitState } from './types';
+import type { AgentNode, Msg, ProcInfo, Res, SessionNode, Snapshot, TaskNode, UnitState } from './types';
 import { ZERO_RES } from './types';
-
-const STATE_LABEL: Record<UnitState, string> = {
-  running: 'en cours',
-  idle: 'inactif',
-  paused: 'suspendue',
-  done: 'terminée',
-  failed: 'échouée',
-  killed: 'tuée',
-  scheduled: 'planifiée',
-  unknown: 'inconnu',
-};
 
 function res(pids: number[], procs: Map<number, RawProc>): Res {
   let cpu = 0;
@@ -165,7 +154,6 @@ function toTaskNode(t: TaskRow, r: Res): TaskNode {
     title: taskTitle(t),
     detail: shortTitle(t.task, 220),
     state: st,
-    stateLabel: STATE_LABEL[st],
     runtime: t.runtime,
     createdAt: t.created_at ?? null,
     startedAt: t.started_at ?? null,
@@ -193,16 +181,15 @@ function liveTurnNode(
   return {
     id: `turn:${key}`,
     kind: 'task',
-    title: prompt ? shortTitle(prompt, 74) : 'Tour en cours',
-    detail: prompt ? prompt.slice(0, 600) : 'Tour en cours — énoncé indisponible.',
+    title: prompt ? shortTitle(prompt, 74) : { k: 'task.liveTurn' },
+    detail: prompt ? prompt.slice(0, 600) : { k: 'task.liveTurnDetail' },
     state: 'running',
-    stateLabel: 'en cours',
-    runtime: 'tour agent',
+    runtime: { k: 'runtime.agentTurn' },
     createdAt: startedAt,
     startedAt,
     endedAt: null,
     durationMs: startedAt ? Date.now() - startedAt : null,
-    summary: `${pids.length} process actif(s)`,
+    summary: { k: 'task.activeProcs', p: { n: pids.length } },
     error: null,
     res: r,
     children: [],
@@ -217,20 +204,22 @@ function cronNode(c: CronRow): TaskNode {
       : c.last_run_status === 'error' || c.last_run_status === 'failed'
         ? 'failed'
         : 'scheduled';
-  const every = c.every_ms ? `toutes les ${Math.round(c.every_ms / 60000)} min` : c.schedule_expr || c.schedule_kind;
+  const desc = c.description || c.name;
+  const detail: Msg = c.every_ms
+    ? { k: 'cron.detailEvery', p: { desc, min: Math.round(c.every_ms / 60000) } }
+    : { k: 'cron.detailExpr', p: { desc, expr: c.schedule_expr || c.schedule_kind } };
   return {
     id: `cron:${c.job_id}`,
     kind: 'cron',
     title: shortTitle(c.display_name || c.name, 60),
-    detail: `${c.description || c.name} · ${every}`,
+    detail,
     state: st,
-    stateLabel: st === 'scheduled' ? 'planifiée' : STATE_LABEL[st],
     runtime: 'cron',
     createdAt: c.last_run_at_ms ?? null,
     startedAt: c.running_at_ms ?? c.last_run_at_ms ?? null,
     endedAt: null,
     durationMs: c.last_duration_ms ?? null,
-    summary: c.next_run_at_ms ? `prochaine exécution ${new Date(c.next_run_at_ms).toLocaleTimeString('fr-FR')}` : null,
+    summary: c.next_run_at_ms ? { k: 'cron.next', ts: c.next_run_at_ms } : null,
     error: c.last_error || null,
     res: ZERO_RES,
     children: [],
@@ -250,17 +239,17 @@ function redactSnapshot(snap: Snapshot): Snapshot {
   const scrubSessions = (nodes: SessionNode[]) => {
     for (const s of nodes) {
       sIdx++;
-      s.title = s.kind === 'subagent' ? `Sous-agent ${sIdx}` : `Session ${sIdx}`;
-      s.subtitle = s.channel ? `${s.channel} · masqué` : 'masqué';
+      s.title = { k: s.kind === 'subagent' ? 'redact.subagent' : 'redact.session', p: { n: sIdx } };
+      s.subtitle = s.channel ? { k: 'redact.channel', p: { ch: s.channel } } : { k: 'redact.hidden' };
       s.key = `${s.key.split(':').slice(0, 3).join(':')}:…`;
       s.sessionId = null;
       s.prompt = null;
       for (const t of s.tasks) {
         tIdx++;
-        t.title = `Tâche ${tIdx}`;
-        t.detail = 'contenu masqué (MONITOR_REDACT=1)';
-        t.summary = t.summary ? 'masqué' : null;
-        t.error = t.error ? 'masqué' : null;
+        t.title = { k: 'redact.task', p: { n: tIdx } };
+        t.detail = { k: 'redact.content' };
+        t.summary = t.summary ? { k: 'redact.hidden' } : null;
+        t.error = t.error ? { k: 'redact.hidden' } : null;
       }
       scrubSessions(s.children);
     }
@@ -270,7 +259,7 @@ function redactSnapshot(snap: Snapshot): Snapshot {
     scrubSessions(a.sessions);
   }
   for (const p of snap.procs) p.cmd = p.cmd.split(' ')[0].split('/').pop() ?? '';
-  snap.host.hostname = 'masqué';
+  snap.host.hostname = { k: 'redact.hidden' };
   return snap;
 }
 
@@ -280,8 +269,8 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   const kids = childIndex(procs);
   const db = readDb(opts.window ?? 72 * 3600 * 1000);
   const agentsCfg = readAgents();
-  const warnings: string[] = [];
-  if (db.error) warnings.push(`sqlite: ${db.error}`);
+  const warnings: Msg[] = [];
+  if (db.error) warnings.push({ k: 'warn.sqlite', p: { err: db.error } });
 
   // --- gateway + navigateur
   let gatewayPid: number | null = null;
@@ -428,10 +417,14 @@ export function collect(opts: { window?: number } = {}): Snapshot {
             sessionId: null,
             kind: 'subagent' as const,
             title: shortTitle(s.label || s.task_name || s.task, 62),
-            subtitle: `sous-agent${s.spawn_mode ? ` · ${s.spawn_mode}` : ''}${s.model ? ` · ${s.model.split('/').pop()}` : ''}`,
+            subtitle: {
+              k: 'session.subagent',
+              p: {
+                extra: `${s.spawn_mode ? ` · ${s.spawn_mode}` : ''}${s.model ? ` · ${s.model.split('/').pop()}` : ''}`,
+              },
+            },
             channel: 'subagent',
             state: st,
-            stateLabel: STATE_LABEL[st],
             startedAt: s.started_at ?? s.created_at,
             lastActivityAt: s.ended_at ?? s.started_at ?? s.created_at,
             model: s.model,
@@ -478,18 +471,17 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       const hasRunning = live || tasks.some((t) => t.state === 'running') || children.some((c) => c.state === 'running');
       const st: UnitState = hasRunning ? 'running' : 'idle';
       const label = meta?.groupChannel || meta?.channel || surface || '';
+      const named = prettyName(meta?.displayName) || cronNameFor(key) || tr.prompt;
+      // à défaut de nom propre, on reprend le titre de la première tâche (déjà tronqué)
+      const title: Msg = named ? shortTitle(named, 70) : (tasks[0]?.title ?? shortTitle(key, 70));
       built.push({
         key,
         sessionId: meta?.sessionId ?? null,
         kind: kind === 'cron' ? 'cron' : 'main',
-        title: shortTitle(
-          prettyName(meta?.displayName) || cronNameFor(key) || tr.prompt || tasks[0]?.title || key,
-          70,
-        ),
-        subtitle: [label, meta?.chatType].filter(Boolean).join(' · ') || 'session',
+        title,
+        subtitle: [label, meta?.chatType].filter(Boolean).join(' · ') || { k: 'session.generic' },
         channel: meta?.channel ?? surface,
         state: st,
-        stateLabel: STATE_LABEL[st],
         startedAt: meta?.startedAt ?? null,
         lastActivityAt: lastActivity || null,
         model: null,
@@ -514,11 +506,10 @@ export function collect(opts: { window?: number } = {}): Snapshot {
         key: `agent:${cfg.id}:__scheduler`,
         sessionId: null,
         kind: 'cron',
-        title: 'Planificateur & tâches système',
-        subtitle: `${crons.length} job(s) cron`,
+        title: { k: 'session.scheduler' },
+        subtitle: { k: 'session.cronJobs', p: { n: crons.length } },
         channel: 'cron',
         state: running ? 'running' : 'scheduled',
-        stateLabel: running ? 'en cours' : 'planifiée',
         startedAt: null,
         lastActivityAt: tasks.reduce((a, t) => Math.max(a, t.startedAt ?? 0), 0) || null,
         model: null,
@@ -569,7 +560,6 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       workspace: cfg.workspace,
       model: cfg.model,
       state: st,
-      stateLabel: st === 'running' ? 'actif' : 'inactif',
       res: agentRes,
       lastActivityAt: lastAct || null,
       stats: {
@@ -595,20 +585,20 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   for (const p of procs.values()) {
     if (p.cpuPct < 0.5 && p.rssMb < 60) continue;
     let kind: ProcInfo['kind'] = 'other';
-    let label = p.comm;
+    let label: Msg = p.comm;
     if (p.pid === gatewayPid) {
       kind = 'gateway';
-      label = 'openclaw gateway';
+      label = { k: 'proc.gateway' };
     } else if (runtimeRoots.has(p.pid)) {
       kind = 'agent-cli';
       const rp = runtimeProcs.find((r) => r.pid === p.pid);
-      label = `runtime ${rp?.agentId ?? '?'}`;
+      label = { k: 'proc.runtime', p: { id: rp?.agentId ?? '?' } };
     } else if (/mcp/i.test(p.cmd)) {
       kind = 'mcp';
-      label = 'serveur MCP';
+      label = { k: 'proc.mcp' };
     } else if (/chrome/.test(p.comm)) {
       kind = 'browser';
-      label = 'chrome (outil navigateur)';
+      label = { k: 'proc.browser' };
     } else if (claimed.has(p.pid)) {
       kind = 'child';
     }

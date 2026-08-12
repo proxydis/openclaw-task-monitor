@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'OpenClaw Monitor',
-  description: 'Supervision temps réel des agents, sous-agents et tâches OpenClaw',
+  description: 'Real-time dashboard for OpenClaw agents, subagents and tasks',
 };
 
 export const viewport: Viewport = {
@@ -14,7 +14,8 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr">
+    // langue par défaut ; <LangProvider> l'ajuste selon la préférence enregistrée
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

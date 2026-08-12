@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentNode, ProcInfo, Res, SessionNode, Snapshot, TaskNode, UnitState } from '@/lib/types';
-import { ago, clock, dur, lvl, mb } from './format';
+import { agentStateLabel, stateLabel } from '@/lib/i18n';
+import { LangProvider, LangSwitch, useI18n } from './LangProvider';
+import { ago, clock, dur, lvl, mb, mbShort } from './format';
 
 // ------------------------------------------------------------------ flux
 
@@ -102,29 +104,33 @@ function resolveSel(snap: Snapshot, ref: SelRef | null): Sel | null {
   return null;
 }
 
-const KIND_LABEL: Record<SessionNode['kind'], string> = {
-  main: 'session',
-  subagent: 'sous-agent',
-  cron: 'planificateur',
+const KIND_KEY: Record<SessionNode['kind'], string> = {
+  main: 'kind.main',
+  subagent: 'kind.subagent',
+  cron: 'kind.cron',
 };
 
 function Bars({ res, cores }: { res: Res; cores: number }) {
+  const { lang, t } = useI18n();
   const cpuW = Math.min(100, (res.cpuPct / (cores * 100)) * 100 * 4);
   const memW = Math.min(100, (res.rssMb / 4096) * 100);
   const zero = res.procs === 0;
   return (
     <div className="metrics">
-      <div className={`metric${zero ? ' zero' : ''}`} title={`${res.cpuPct}% d'un cœur · ${res.procs} process`}>
+      <div
+        className={`metric${zero ? ' zero' : ''}`}
+        title={t('fmt.cpuTip', { p: res.cpuPct, n: res.procs })}
+      >
         <span className="bar">
           <i style={{ width: `${cpuW}%` }} />
         </span>
         <span>{res.cpuPct.toFixed(0)}%</span>
       </div>
-      <div className={`metric mem${zero ? ' zero' : ''}`} title={`${mb(res.rssMb)} de RSS cumulé`}>
+      <div className={`metric mem${zero ? ' zero' : ''}`} title={t('fmt.memTip', { v: mb(lang, res.rssMb) })}>
         <span className="bar">
           <i style={{ width: `${memW}%` }} />
         </span>
-        <span>{res.rssMb >= 1024 ? `${(res.rssMb / 1024).toFixed(1)}G` : `${res.rssMb}M`}</span>
+        <span>{mbShort(lang, res.rssMb)}</span>
       </div>
     </div>
   );
@@ -145,6 +151,7 @@ function Row(props: {
   onToggle: () => void;
   onSelect: () => void;
 }) {
+  const { lang } = useI18n();
   const { state, title, subtitle, badges = [], res, cores, age, hasKids, open, selected } = props;
   return (
     <div
@@ -166,7 +173,7 @@ function Row(props: {
         </span>
       ))}
       {res ? <Bars res={res} cores={cores} /> : <div className="metrics" />}
-      <span className="age">{age ? ago(age) : ''}</span>
+      <span className="age">{age ? ago(lang, age) : ''}</span>
     </div>
   );
 }
@@ -186,7 +193,8 @@ function TaskRows({
   onSelect: (t: TaskNode) => void;
   match: (s: string) => boolean;
 }) {
-  const visible = tasks.filter((t) => match(`${t.title} ${t.detail} ${t.runtime}`));
+  const { lang, t: tr, m } = useI18n();
+  const visible = tasks.filter((t) => match(`${m(t.title)} ${m(t.detail)} ${m(t.runtime)}`));
   if (!visible.length) return null;
   return (
     <div className="kids">
@@ -195,11 +203,11 @@ function TaskRows({
           key={t.id}
           depth={depth}
           state={t.state}
-          title={t.title}
-          subtitle={t.runtime}
+          title={m(t.title)}
+          subtitle={m(t.runtime)}
           badges={[
-            { text: t.stateLabel, cls: t.state },
-            ...(t.kind === 'cron' ? [{ text: 'cron', cls: 'scheduled' }] : []),
+            { text: stateLabel(lang, t.state), cls: t.state },
+            ...(t.kind === 'cron' ? [{ text: tr('badge.cron'), cls: 'scheduled' }] : []),
           ]}
           res={t.res}
           cores={cores}
@@ -238,6 +246,7 @@ function SessionRows({
   match: (s: string) => boolean;
   showDone: boolean;
 }) {
+  const { lang, t: tr, m } = useI18n();
   return (
     <div className="kids">
       {sessions.map((s) => {
@@ -245,22 +254,22 @@ function SessionRows({
         const kids = s.children.length + tasks.length;
         const id = `s:${s.key}`;
         const isOpen = open.has(id);
-        const deep = `${s.title} ${s.subtitle} ${s.key} ${s.tasks.map((t) => t.title).join(' ')}`;
+        const deep = `${m(s.title)} ${m(s.subtitle)} ${s.key} ${s.tasks.map((t) => m(t.title)).join(' ')}`;
         const selfMatch = match(deep);
-        const kidMatch = s.children.some((c) => match(`${c.title} ${c.subtitle}`));
+        const kidMatch = s.children.some((c) => match(`${m(c.title)} ${m(c.subtitle)}`));
         if (!selfMatch && !kidMatch) return null;
         return (
           <div className="node" key={id}>
             <Row
               depth={depth}
               state={s.state}
-              title={s.title}
-              subtitle={s.subtitle}
+              title={m(s.title)}
+              subtitle={m(s.subtitle)}
               badges={[
-                ...(s.kind === 'subagent' ? [{ text: 'sous-agent', cls: 'sub' }] : []),
-                ...(s.kind === 'cron' ? [{ text: 'cron', cls: 'scheduled' }] : []),
-                ...(s.state === 'running' ? [{ text: 'en cours', cls: 'running' }] : []),
-                ...(tasks.length ? [{ text: `${tasks.length} tâche${tasks.length > 1 ? 's' : ''}`, cls: '' }] : []),
+                ...(s.kind === 'subagent' ? [{ text: tr('badge.subagent'), cls: 'sub' }] : []),
+                ...(s.kind === 'cron' ? [{ text: tr('badge.cron'), cls: 'scheduled' }] : []),
+                ...(s.state === 'running' ? [{ text: stateLabel(lang, 'running'), cls: 'running' }] : []),
+                ...(tasks.length ? [{ text: tr('badge.tasks', { n: tasks.length }), cls: '' }] : []),
               ]}
               res={s.res}
               cores={cores}
@@ -306,14 +315,16 @@ function SessionRows({
 
 // ------------------------------------------------------------------ détail
 
-function Detail({ sel, snap }: { sel: Sel | null; snap: Snapshot }) {
+function Detail({ sel }: { sel: Sel | null }) {
+  const { lang, t: tr, m } = useI18n();
+
   if (!sel) {
     return (
       <div className="panel detail">
         <header>
-          <h2>Détail</h2>
+          <h2>{tr('detail.title')}</h2>
         </header>
-        <div className="empty">Sélectionne un agent, une session ou une tâche dans l’arbre.</div>
+        <div className="empty">{tr('detail.empty')}</div>
       </div>
     );
   }
@@ -323,33 +334,33 @@ function Detail({ sel, snap }: { sel: Sel | null; snap: Snapshot }) {
     return (
       <div className="panel detail">
         <header>
-          <h2>Agent</h2>
-          <span className={`badge ${a.state}`}>{a.stateLabel}</span>
+          <h2>{tr('detail.agent')}</h2>
+          <span className={`badge ${a.state}`}>{agentStateLabel(lang, a.state)}</span>
         </header>
         <div className="body">
           <h3>{a.name}</h3>
           <div className="path">{a.workspace ?? '—'}</div>
           <dl className="kv">
-            <dt>Identifiant</dt>
+            <dt>{tr('f.id')}</dt>
             <dd>{a.id}</dd>
-            <dt>Modèle</dt>
+            <dt>{tr('f.model')}</dt>
             <dd>{a.model ?? '—'}</dd>
-            <dt>CPU</dt>
-            <dd>{a.res.cpuPct}% · {a.res.procs} process</dd>
-            <dt>Mémoire</dt>
-            <dd>{mb(a.res.rssMb)}</dd>
-            <dt>Dernière activité</dt>
-            <dd>{clock(a.lastActivityAt)}</dd>
+            <dt>{tr('f.cpu')}</dt>
+            <dd>{tr('v.cpuProcs', { p: a.res.cpuPct, n: a.res.procs })}</dd>
+            <dt>{tr('f.memory')}</dt>
+            <dd>{mb(lang, a.res.rssMb)}</dd>
+            <dt>{tr('f.lastActivity')}</dt>
+            <dd>{clock(lang, a.lastActivityAt)}</dd>
           </dl>
-          <div className="section-t">Compteurs</div>
+          <div className="section-t">{tr('f.counters')}</div>
           <dl className="kv">
-            <dt>Sessions</dt>
-            <dd>{a.stats.sessions} dont {a.stats.liveSessions} active(s)</dd>
-            <dt>Sous-agents</dt>
+            <dt>{tr('f.sessions')}</dt>
+            <dd>{tr('v.sessionsOf', { n: a.stats.sessions, live: a.stats.liveSessions })}</dd>
+            <dt>{tr('f.subagents')}</dt>
             <dd>{a.stats.subagents}</dd>
-            <dt>Tâches 24 h</dt>
-            <dd>{a.stats.tasks24h} · {a.stats.runningTasks} en cours</dd>
-            <dt>Échecs 24 h</dt>
+            <dt>{tr('f.tasks24h')}</dt>
+            <dd>{tr('v.tasksOf', { n: a.stats.tasks24h, r: a.stats.runningTasks })}</dd>
+            <dt>{tr('f.failed24h')}</dt>
             <dd>{a.stats.failed24h}</dd>
           </dl>
         </div>
@@ -362,39 +373,41 @@ function Detail({ sel, snap }: { sel: Sel | null; snap: Snapshot }) {
     return (
       <div className="panel detail">
         <header>
-          <h2>{KIND_LABEL[s.kind]}</h2>
-          <span className={`badge ${s.state}`}>{s.stateLabel}</span>
+          <h2>{tr(KIND_KEY[s.kind])}</h2>
+          <span className={`badge ${s.state}`}>{stateLabel(lang, s.state)}</span>
         </header>
         <div className="body">
-          <h3>{s.title}</h3>
+          <h3>{m(s.title)}</h3>
           <div className="path">{s.key}</div>
           <dl className="kv">
-            <dt>Agent</dt>
+            <dt>{tr('f.agent')}</dt>
             <dd>{sel.agent.name}</dd>
-            <dt>Canal</dt>
-            <dd>{s.subtitle}</dd>
-            <dt>Modèle</dt>
+            <dt>{tr('f.channel')}</dt>
+            <dd>{m(s.subtitle)}</dd>
+            <dt>{tr('f.model')}</dt>
             <dd>{s.model ?? sel.agent.model ?? '—'}</dd>
-            <dt>Démarrée</dt>
-            <dd>{clock(s.startedAt)}</dd>
-            <dt>Activité</dt>
-            <dd>{clock(s.lastActivityAt)}</dd>
-            <dt>CPU / RAM</dt>
-            <dd>{s.res.cpuPct}% · {mb(s.res.rssMb)}</dd>
-            <dt>Process</dt>
-            <dd>{s.pids.length ? s.pids.slice(0, 12).join(', ') : 'aucun (session au repos)'}</dd>
+            <dt>{tr('f.started')}</dt>
+            <dd>{clock(lang, s.startedAt)}</dd>
+            <dt>{tr('f.activity')}</dt>
+            <dd>{clock(lang, s.lastActivityAt)}</dd>
+            <dt>{tr('f.cpuRam')}</dt>
+            <dd>
+              {s.res.cpuPct}% · {mb(lang, s.res.rssMb)}
+            </dd>
+            <dt>{tr('f.processes')}</dt>
+            <dd>{s.pids.length ? s.pids.slice(0, 12).join(', ') : tr('v.noProcs')}</dd>
           </dl>
           {s.prompt ? (
             <>
-              <div className="section-t">Dernière demande</div>
+              <div className="section-t">{tr('f.lastRequest')}</div>
               <div className="quote">{s.prompt}</div>
             </>
           ) : null}
           {s.tasks.length ? (
             <>
-              <div className="section-t">Tâches ({s.tasks.length})</div>
+              <div className="section-t">{tr('v.tasksTitle', { n: s.tasks.length })}</div>
               <div className="quote">
-                {s.tasks.map((t) => `[${t.stateLabel}] ${t.title}`).join('\n')}
+                {s.tasks.map((t) => `[${stateLabel(lang, t.state)}] ${m(t.title)}`).join('\n')}
               </div>
             </>
           ) : null}
@@ -407,42 +420,42 @@ function Detail({ sel, snap }: { sel: Sel | null; snap: Snapshot }) {
   return (
     <div className="panel detail">
       <header>
-        <h2>Tâche</h2>
-        <span className={`badge ${t.state}`}>{t.stateLabel}</span>
+        <h2>{tr('detail.task')}</h2>
+        <span className={`badge ${t.state}`}>{stateLabel(lang, t.state)}</span>
       </header>
       <div className="body">
-        <h3>{t.title}</h3>
+        <h3>{m(t.title)}</h3>
         <div className="path">{t.id}</div>
         <dl className="kv">
-          <dt>Agent</dt>
+          <dt>{tr('f.agent')}</dt>
           <dd>{sel.agent.name}</dd>
-          <dt>Session</dt>
-          <dd>{sel.session?.title ?? '—'}</dd>
-          <dt>Runtime</dt>
-          <dd>{t.runtime}</dd>
-          <dt>Créée</dt>
-          <dd>{clock(t.createdAt)}</dd>
-          <dt>Démarrée</dt>
-          <dd>{clock(t.startedAt)}</dd>
-          <dt>Terminée</dt>
-          <dd>{t.endedAt ? clock(t.endedAt) : '—'}</dd>
-          <dt>Durée</dt>
-          <dd>{dur(t.durationMs)}</dd>
-          <dt>CPU / RAM</dt>
-          <dd>{t.res.procs ? `${t.res.cpuPct}% · ${mb(t.res.rssMb)}` : '—'}</dd>
+          <dt>{tr('f.session')}</dt>
+          <dd>{sel.session ? m(sel.session.title) : '—'}</dd>
+          <dt>{tr('f.runtime')}</dt>
+          <dd>{m(t.runtime)}</dd>
+          <dt>{tr('f.created')}</dt>
+          <dd>{clock(lang, t.createdAt)}</dd>
+          <dt>{tr('f.started')}</dt>
+          <dd>{clock(lang, t.startedAt)}</dd>
+          <dt>{tr('f.ended')}</dt>
+          <dd>{t.endedAt ? clock(lang, t.endedAt) : '—'}</dd>
+          <dt>{tr('f.duration')}</dt>
+          <dd>{dur(lang, t.durationMs)}</dd>
+          <dt>{tr('f.cpuRam')}</dt>
+          <dd>{t.res.procs ? `${t.res.cpuPct}% · ${mb(lang, t.res.rssMb)}` : '—'}</dd>
         </dl>
         {t.summary ? (
           <>
-            <div className="section-t">Progression</div>
-            <div className="quote">{t.summary}</div>
+            <div className="section-t">{tr('f.progress')}</div>
+            <div className="quote">{m(t.summary)}</div>
           </>
         ) : null}
-        <div className="section-t">Énoncé</div>
-        <div className="quote">{t.detail}</div>
+        <div className="section-t">{tr('f.prompt')}</div>
+        <div className="quote">{m(t.detail)}</div>
         {t.error ? (
           <>
-            <div className="section-t">Erreur</div>
-            <div className="quote err">{t.error}</div>
+            <div className="section-t">{tr('f.error')}</div>
+            <div className="quote err">{m(t.error)}</div>
           </>
         ) : null}
       </div>
@@ -453,17 +466,18 @@ function Detail({ sel, snap }: { sel: Sel | null; snap: Snapshot }) {
 // ------------------------------------------------------------------ process
 
 function Procs({ procs }: { procs: ProcInfo[] }) {
+  const { lang, t: tr, m } = useI18n();
   return (
     <div className="body" style={{ overflow: 'auto', maxHeight: '70vh' }}>
       <table className="procs">
         <thead>
           <tr>
-            <th>PID</th>
-            <th>Rôle</th>
-            <th>Commande</th>
-            <th style={{ textAlign: 'right' }}>CPU</th>
-            <th style={{ textAlign: 'right' }}>RSS</th>
-            <th style={{ textAlign: 'right' }}>Âge</th>
+            <th>{tr('th.pid')}</th>
+            <th>{tr('th.role')}</th>
+            <th>{tr('th.command')}</th>
+            <th style={{ textAlign: 'right' }}>{tr('th.cpu')}</th>
+            <th style={{ textAlign: 'right' }}>{tr('th.rss')}</th>
+            <th style={{ textAlign: 'right' }}>{tr('th.age')}</th>
           </tr>
         </thead>
         <tbody>
@@ -471,14 +485,14 @@ function Procs({ procs }: { procs: ProcInfo[] }) {
             <tr key={p.pid}>
               <td className="n">{p.pid}</td>
               <td>
-                <span className={`tag ${p.kind === 'agent-cli' ? 'agentcli' : p.kind}`}>{p.label}</span>
+                <span className={`tag ${p.kind === 'agent-cli' ? 'agentcli' : p.kind}`}>{m(p.label)}</span>
               </td>
               <td title={p.cmd} style={{ maxWidth: 420, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {p.cmd}
               </td>
               <td className="n">{p.cpuPct.toFixed(1)}%</td>
-              <td className="n">{mb(p.rssMb)}</td>
-              <td className="n">{ago(p.startedAt)}</td>
+              <td className="n">{mb(lang, p.rssMb)}</td>
+              <td className="n">{ago(lang, p.startedAt)}</td>
             </tr>
           ))}
         </tbody>
@@ -487,9 +501,27 @@ function Procs({ procs }: { procs: ProcInfo[] }) {
   );
 }
 
+// ------------------------------------------------------------------ légende
+
+function Legend() {
+  const { lang, t: tr } = useI18n();
+  const states: UnitState[] = ['running', 'idle', 'paused', 'done', 'failed', 'killed', 'scheduled'];
+  return (
+    <div className="legend">
+      {states.map((s) => (
+        <span key={s}>
+          <i className={`dot ${s}`} /> {stateLabel(lang, s)}
+        </span>
+      ))}
+      <span>{tr('legend.note')}</span>
+    </div>
+  );
+}
+
 // ------------------------------------------------------------------ page
 
-export default function Dashboard() {
+function DashboardInner() {
+  const { lang, t: tr, m } = useI18n();
   const { snap, live, err } = useSnapshot();
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [selRef, setSelRef] = useState<SelRef | null>(null);
@@ -504,19 +536,19 @@ export default function Dashboard() {
     if (!snap || bootstrapped.current) return;
     bootstrapped.current = true;
     const next = new Set<string>();
-    let first: Sel | null = null;
+    let first: SessionNode | null = null;
     for (const a of snap.agents) {
       if (a.state === 'running') {
         next.add(`a:${a.id}`);
         for (const s of a.sessions)
           if (s.state === 'running') {
             next.add(`s:${s.key}`);
-            if (!first) first = { type: 'session', node: s, agent: a };
+            if (!first) first = s;
           }
       }
     }
     setOpen(next);
-    if (first) setSelRef({ type: 'session', id: (first as any).node.key });
+    if (first) setSelRef({ type: 'session', id: first.key });
   }, [snap]);
 
   const setSel = useCallback((s: Sel) => {
@@ -546,12 +578,13 @@ export default function Dashboard() {
             <span className="logo">◈</span>
             <div>
               <h1>OpenClaw Monitor</h1>
-              <div className="sub">connexion au flux…</div>
+              <div className="sub">{tr('ui.connecting')}</div>
             </div>
           </div>
+          <LangSwitch />
         </div>
         <div className="panel">
-          <div className="empty">{err ? `Erreur : ${err}` : 'Chargement du premier instantané…'}</div>
+          <div className="empty">{err ? tr('ui.error', { e: err }) : tr('ui.loading')}</div>
         </div>
       </div>
     );
@@ -570,39 +603,50 @@ export default function Dashboard() {
           <div>
             <h1>OpenClaw Monitor</h1>
             <div className="sub">
-              {h.hostname} · {h.cores} cœurs · uptime {dur(h.uptimeSec * 1000)}
+              {tr('ui.hostLine', {
+                host: m(h.hostname),
+                cores: h.cores,
+                up: dur(lang, h.uptimeSec * 1000),
+              })}
             </div>
           </div>
         </div>
         <div className="live">
           <span className={`pulse${live ? '' : ' off'}`} />
-          {live ? 'temps réel' : 'reconnexion…'} · maj {ago(snap.ts)} · scan {snap.collectMs} ms
+          {tr('ui.streamLine', {
+            state: live ? tr('ui.live') : tr('ui.reconnecting'),
+            ago: ago(lang, snap.ts),
+            ms: snap.collectMs,
+          })}
         </div>
         <div className="live">
           <span className={`dot ${snap.gateway.up ? 'running' : 'failed'}`} />
-          gateway {snap.gateway.up ? `pid ${snap.gateway.pid} · port ${snap.gateway.port ?? '?'}` : 'arrêté'}
-          {snap.gateway.uptimeSec ? ` · ${dur(snap.gateway.uptimeSec * 1000)}` : ''}
+          {snap.gateway.up
+            ? tr('ui.gatewayUp', { pid: snap.gateway.pid ?? '?', port: snap.gateway.port ?? '?' })
+            : tr('ui.gatewayDown')}
+          {snap.gateway.uptimeSec ? ` · ${dur(lang, snap.gateway.uptimeSec * 1000)}` : ''}
         </div>
+        <LangSwitch />
       </div>
 
-      {snap.warnings.length ? <div className="warn-banner">{snap.warnings.join(' · ')}</div> : null}
+      {snap.warnings.length ? <div className="warn-banner">{snap.warnings.map(m).join(' · ')}</div> : null}
 
       <div className="kpis">
         <div className="kpi">
-          <div className="k">Agents actifs</div>
+          <div className="k">{tr('kpi.activeAgents')}</div>
           <div className="v">
             {snap.totals.activeAgents}
             <span className="u">/ {snap.totals.agents}</span>
           </div>
-          <div className="foot">{snap.totals.liveSessions} session(s) vivante(s)</div>
+          <div className="foot">{tr('kpi.liveSessions', { n: snap.totals.liveSessions })}</div>
         </div>
         <div className="kpi">
-          <div className="k">Tâches en cours</div>
+          <div className="k">{tr('kpi.runningTasks')}</div>
           <div className="v">{snap.totals.runningTasks}</div>
-          <div className="foot">{snap.totals.subagentsLive} sous-agent(s) actif(s)</div>
+          <div className="foot">{tr('kpi.liveSubagents', { n: snap.totals.subagentsLive })}</div>
         </div>
         <div className={`kpi${h.cpuPct >= 90 ? ' alert' : ''}`}>
-          <div className="k">CPU machine</div>
+          <div className="k">{tr('kpi.cpu')}</div>
           <div className="v">
             {h.cpuPct.toFixed(0)}
             <span className="u">%</span>
@@ -610,38 +654,41 @@ export default function Dashboard() {
           <div className="meter">
             <i className={lvl(h.cpuPct)} style={{ width: `${h.cpuPct}%` }} />
           </div>
-          <div className="foot">load {h.load.map((x) => x.toFixed(2)).join(' · ')}</div>
+          <div className="foot">{tr('kpi.load', { v: h.load.map((x) => x.toFixed(2)).join(' · ') })}</div>
         </div>
         <div className={`kpi${memPct >= 90 ? ' alert' : ''}`}>
-          <div className="k">Mémoire</div>
+          <div className="k">{tr('kpi.memory')}</div>
           <div className="v">
             {(h.memUsedMb / 1024).toFixed(1)}
-            <span className="u">/ {(h.memTotalMb / 1024).toFixed(1)} Go</span>
+            <span className="u">/ {mb(lang, h.memTotalMb)}</span>
           </div>
           <div className="meter">
             <i className={lvl(memPct)} style={{ width: `${memPct}%` }} />
           </div>
-          <div className="foot">{mb(h.memAvailMb)} disponibles</div>
+          <div className="foot">{tr('kpi.available', { v: mb(lang, h.memAvailMb) })}</div>
         </div>
         <div className={`kpi${swapPct >= 85 ? ' alert' : ''}`}>
-          <div className="k">Swap</div>
+          <div className="k">{tr('kpi.swap')}</div>
           <div className="v">
             {(h.swapUsedMb / 1024).toFixed(1)}
-            <span className="u">/ {(h.swapTotalMb / 1024).toFixed(1)} Go</span>
+            <span className="u">/ {mb(lang, h.swapTotalMb)}</span>
           </div>
           <div className="meter">
             <i className={lvl(swapPct)} style={{ width: `${swapPct}%` }} />
           </div>
-          <div className="foot">{swapPct.toFixed(0)} % utilisé</div>
+          <div className="foot">{tr('kpi.swapUsed', { n: swapPct.toFixed(0) })}</div>
         </div>
         <div className="kpi">
-          <div className="k">Gateway</div>
+          <div className="k">{tr('kpi.gateway')}</div>
           <div className="v">
             {snap.gateway.res.cpuPct.toFixed(0)}
-            <span className="u">% · {mb(snap.gateway.res.rssMb)}</span>
+            <span className="u">% · {mb(lang, snap.gateway.res.rssMb)}</span>
           </div>
           <div className="foot">
-            navigateur {mb(snap.system.browser.rssMb)} · {snap.gateway.res.procs} process
+            {tr('kpi.gatewayFoot', {
+              v: mb(lang, snap.system.browser.rssMb),
+              n: snap.gateway.res.procs,
+            })}
           </div>
         </div>
       </div>
@@ -649,23 +696,23 @@ export default function Dashboard() {
       <div className="cols">
         <div className="panel">
           <header>
-            <h2>Arbre des agents</h2>
+            <h2>{tr('panel.tree')}</h2>
             <div className="tabs">
               <button className={`tab${tab === 'tree' ? ' on' : ''}`} onClick={() => setTab('tree')}>
-                Arbre
+                {tr('tab.tree')}
               </button>
               <button className={`tab${tab === 'procs' ? ' on' : ''}`} onClick={() => setTab('procs')}>
-                Process ({snap.procs.length})
+                {tr('tab.procs', { n: snap.procs.length })}
               </button>
             </div>
-            <input className="search" placeholder="filtrer…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input className="search" placeholder={tr('ui.filter')} value={q} onChange={(e) => setQ(e.target.value)} />
             <label className="toggle">
               <input type="checkbox" checked={showIdle} onChange={(e) => setShowIdle(e.target.checked)} />
-              inactifs
+              {tr('toggle.idle')}
             </label>
             <label className="toggle">
               <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
-              terminées
+              {tr('toggle.done')}
             </label>
           </header>
 
@@ -673,7 +720,7 @@ export default function Dashboard() {
             <Procs procs={snap.procs} />
           ) : (
             <div className="body">
-              {agents.length === 0 ? <div className="empty">Aucun agent à afficher.</div> : null}
+              {agents.length === 0 ? <div className="empty">{tr('ui.noAgents')}</div> : null}
               {agents.map((a) => {
                 const id = `a:${a.id}`;
                 const isOpen = open.has(id);
@@ -686,10 +733,16 @@ export default function Dashboard() {
                       title={a.name}
                       subtitle={a.model ?? undefined}
                       badges={[
-                        { text: a.stateLabel, cls: a.state === 'running' ? 'running' : '' },
-                        ...(a.stats.runningTasks ? [{ text: `${a.stats.runningTasks} en cours`, cls: 'kind' }] : []),
-                        ...(a.stats.subagents ? [{ text: `${a.stats.subagents} sous-agents`, cls: 'sub' }] : []),
-                        ...(a.stats.failed24h ? [{ text: `${a.stats.failed24h} échec(s)`, cls: 'failed' }] : []),
+                        { text: agentStateLabel(lang, a.state), cls: a.state === 'running' ? 'running' : '' },
+                        ...(a.stats.runningTasks
+                          ? [{ text: tr('badge.runningTasks', { n: a.stats.runningTasks }), cls: 'kind' }]
+                          : []),
+                        ...(a.stats.subagents
+                          ? [{ text: tr('badge.subagents', { n: a.stats.subagents }), cls: 'sub' }]
+                          : []),
+                        ...(a.stats.failed24h
+                          ? [{ text: tr('badge.failed', { n: a.stats.failed24h }), cls: 'failed' }]
+                          : []),
                       ]}
                       res={a.res}
                       cores={h.cores}
@@ -720,34 +773,19 @@ export default function Dashboard() {
             </div>
           )}
 
-          <div className="legend">
-            <span>
-              <i className="dot running" /> en cours
-            </span>
-            <span>
-              <i className="dot idle" /> inactif
-            </span>
-            <span>
-              <i className="dot paused" /> suspendue
-            </span>
-            <span>
-              <i className="dot done" /> terminée
-            </span>
-            <span>
-              <i className="dot failed" /> échouée
-            </span>
-            <span>
-              <i className="dot killed" /> tuée
-            </span>
-            <span>
-              <i className="dot scheduled" /> planifiée
-            </span>
-            <span>CPU = % d’un cœur · RAM = RSS cumulé du sous-arbre</span>
-          </div>
+          <Legend />
         </div>
 
-        <Detail sel={sel} snap={snap} />
+        <Detail sel={sel} />
       </div>
     </div>
+  );
+}
+
+export default function Dashboard() {
+  return (
+    <LangProvider>
+      <DashboardInner />
+    </LangProvider>
   );
 }

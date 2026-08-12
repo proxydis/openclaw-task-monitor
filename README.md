@@ -1,111 +1,206 @@
 # OpenClaw Task Monitor
 
-Tableau de bord temps réel pour une installation [OpenClaw](https://github.com/openclaw/openclaw) :
-agents, sessions, sous-agents, tâches et consommation CPU/RAM de chaque unité, dans un seul
-arbre.
+**English** · [Français](README.fr.md)
 
-**Aucun appel modèle, aucun token consommé.** L'outil se contente de lire des informations
-déjà produites par OpenClaw : base d'état SQLite, fichiers de sessions, transcripts et `/proc`.
+Real-time dashboard for an [OpenClaw](https://github.com/openclaw/openclaw) install:
+agents, sessions, subagents, tasks and the CPU/RAM footprint of every unit, in a single tree.
 
-![Capture du tableau de bord](docs/screenshot.png)
+**No model call, no token spent.** The tool only reads information OpenClaw already
+produces: the SQLite state database, session files, transcripts and `/proc`.
 
-## Ce qu'il montre
+![Dashboard screenshot](docs/screenshot.png)
 
-- **Arbre** `agent → session → sous-agent → tâche`, replié sur les unités inactives
-- **État** de chaque unité : en cours · inactif · suspendue · terminée · échouée · tuée · planifiée
-- **CPU et RAM par unité** — le CPU est un pourcentage d'un cœur (comme `top`), la RAM le RSS
-  cumulé de tout le sous-arbre de process rattaché à l'unité
-- **Titre court de la tâche**, extrait du dernier message utilisateur du transcript, pour
-  identifier d'un coup d'œil la nature du travail en cours
-- **Santé machine** : CPU, mémoire, swap, load, uptime de la gateway
-- Panneau de détail vivant, filtre texte, onglet des process bruts
+## What it shows
 
-## Installation
+- **Tree** `agent → session → subagent → task`, collapsed on idle units
+- **State** of every unit: running · idle · paused · finished · failed · killed · scheduled
+- **CPU and RAM per unit** — CPU is a percentage of one core (like `top`), RAM is the
+  cumulative RSS of the whole process subtree attached to the unit
+- **Short task title**, extracted from the last user message of the transcript, to tell
+  at a glance what the work in progress is about
+- **Machine health**: CPU, memory, swap, load, gateway uptime
+- Live detail panel, text filter, raw process tab
+- **Interface in English or French**, switchable from the `EN / FR` toggle in the top-right
+  corner (English by default, choice remembered in the browser)
 
-Prérequis : Node.js ≥ 22 (l'outil utilise le module natif `node:sqlite`), une installation
-OpenClaw locale, Linux (lecture de `/proc`).
+## Requirements
 
-```bash
-git clone https://github.com/<compte>/openclaw-task-monitor.git
-cd openclaw-task-monitor
-./install.sh          # build + service systemd utilisateur, port 3200 par défaut
-./install.sh 3300     # ou un autre port
-```
-
-Sans systemd :
-
-```bash
-npm install && npx next build
-cp -r .next/static .next/standalone/.next/static
-PORT=3200 node .next/standalone/server.js
-```
-
-### Variables d'environnement
-
-| Variable | Défaut | Rôle |
-|---|---|---|
-| `PORT` | `3200` | port d'écoute |
-| `HOSTNAME` | `127.0.0.1` | interface d'écoute |
-| `OPENCLAW_HOME` | `~/.openclaw` | racine de l'installation supervisée |
-| `MONITOR_REDACT` | — | `1` masque tout contenu métier (voir ci-dessous) |
-
-## Sécurité — à lire avant d'exposer le service
-
-Le tableau de bord affiche **le contenu des demandes envoyées aux agents**, les noms de
-canaux et les identifiants de session. Il n'a **aucune authentification**.
-
-- Il écoute sur `127.0.0.1` par défaut. Ne le bindez sur `0.0.0.0` qu'en réseau de confiance,
-  ou placez-le derrière un reverse proxy authentifié.
-- Pour une capture d'écran, une démo ou une présentation publique, lancez-le avec
-  `MONITOR_REDACT=1` : la structure de l'arbre et les mesures CPU/RAM restent intactes, mais
-  les énoncés de tâches, noms de canaux, chemins et nom d'hôte sont remplacés par des
-  libellés neutres.
-
-## Sources de données (lecture seule)
-
-| Donnée | Source |
+| | |
 |---|---|
-| Agents, workspace, modèle | `openclaw.json` + `agents/*/` |
-| Sessions, canal, dernière activité | `agents/<id>/sessions/sessions.json` |
-| Titre de la tâche en cours | dernier message utilisateur du transcript `.jsonl` (queue du fichier, 512 Ko max) |
-| Tâches, sous-agents, flows, cron | `state/openclaw.sqlite`, ouvert en `readOnly` |
+| OS | Linux — the tool reads `/proc` |
+| Node.js | **≥ 22.5**, required by the built-in `node:sqlite` module (`node --version` to check) |
+| OpenClaw | a local install, readable by the user running the monitor |
+| Port | `3200` free by default (configurable) |
+
+Nothing else to install: no database, no external service, no API key.
+
+## Install and run
+
+### Option A — as a systemd user service (recommended)
+
+Starts on boot, restarts on failure, memory-capped. One command:
+
+```bash
+git clone https://github.com/proxydis/openclaw-task-monitor.git
+cd openclaw-task-monitor
+./install.sh
+```
+
+`install.sh` does everything: installs dependencies, builds the production bundle,
+generates the `~/.config/systemd/user/openclaw-monitor.service` unit, enables it and
+starts it. Once it prints `✓ http://127.0.0.1:3200`, open that URL.
+
+To use another port:
+
+```bash
+./install.sh 3300
+```
+
+To keep the service alive after logout (otherwise systemd stops user services at the end
+of the session):
+
+```bash
+sudo loginctl enable-linger "$USER"
+```
+
+### Option B — run it by hand, no systemd
+
+Useful to try it out or on a machine without systemd:
+
+```bash
+git clone https://github.com/proxydis/openclaw-task-monitor.git
+cd openclaw-task-monitor
+
+npm install                                     # dependencies
+npx next build                                  # production build
+cp -r .next/static .next/standalone/.next/static # static assets of the standalone bundle
+
+PORT=3200 node .next/standalone/server.js       # start
+```
+
+Then open <http://127.0.0.1:3200>. Stop it with `Ctrl+C`.
+
+### Option C — development mode
+
+Hot reload, no build step:
+
+```bash
+npm install
+npm run dev     # http://127.0.0.1:3200
+```
+
+### Check it works
+
+```bash
+curl -s http://127.0.0.1:3200/api/state | head -c 200   # JSON snapshot
+```
+
+An empty tree usually means the monitor is not looking at the right install: see
+`OPENCLAW_HOME` below.
+
+## Configuration
+
+Every setting goes through environment variables.
+
+| Variable | Default | Role |
+|---|---|---|
+| `PORT` | `3200` | listening port |
+| `HOSTNAME` | `127.0.0.1` | listening interface |
+| `OPENCLAW_HOME` | `~/.openclaw` | root of the supervised install |
+| `MONITOR_REDACT` | — | `1` masks all business content (see below) |
+
+With systemd, edit the generated unit then reload:
+
+```bash
+systemctl --user edit --full openclaw-monitor.service
+systemctl --user restart openclaw-monitor.service
+```
+
+## Security — read before exposing the service
+
+The dashboard displays **the content of the requests sent to the agents**, channel names
+and session identifiers. It has **no authentication**.
+
+- It listens on `127.0.0.1` by default. Only bind it to `0.0.0.0` on a trusted network,
+  or put it behind an authenticated reverse proxy.
+- For a screenshot, a demo or a public talk, run it with `MONITOR_REDACT=1`: the tree
+  structure and the CPU/RAM measurements stay intact, but task prompts, channel names,
+  paths and hostname are replaced by neutral labels.
+
+## Data sources (read-only)
+
+| Data | Source |
+|---|---|
+| Agents, workspace, model | `openclaw.json` + `agents/*/` |
+| Sessions, channel, last activity | `agents/<id>/sessions/sessions.json` |
+| Title of the running task | last user message of the `.jsonl` transcript (tail of the file, 512 KB max) |
+| Tasks, subagents, flows, cron | `state/openclaw.sqlite`, opened `readOnly` |
 | CPU / RAM | `/proc/<pid>/stat`, `/proc/meminfo`, `/proc/stat` |
 
-### Rattachement process → session
+### Attaching a process to a session
 
-La gateway lance chaque runtime CLI (`claude`, `codex`, `gemini`) avec
-`--append-system-prompt-file`. Ce fichier contient une ligne
-`Runtime: agent=… | session=… | model=…`, ce qui donne un rattachement **exact** process →
-session. Tout le sous-arbre du process — serveurs MCP, shells, outils — est comptabilisé sur
-cette session. À défaut, le `cwd` du process est comparé aux workspaces déclarés pour
-rattacher au moins l'agent. Le reste du sous-arbre de la gateway est comptabilisé comme
-« gateway », Chrome comme « navigateur ».
+The gateway starts every CLI runtime (`claude`, `codex`, `gemini`) with
+`--append-system-prompt-file`. That file contains a
+`Runtime: agent=… | session=… | model=…` line, which gives an **exact** process → session
+mapping. The whole process subtree — MCP servers, shells, tools — is accounted for on that
+session. Failing that, the process `cwd` is compared to the declared workspaces to at least
+attach the agent. The rest of the gateway subtree is accounted as “gateway”, Chrome as
+“browser”.
 
-### Tâches en cours
+### Running tasks
 
-Les tours d'agent CLI ne sont écrits dans `task_runs` qu'à leur terminaison. Une tâche
-« en cours » est donc soit une ligne `task_runs` non terminée, soit un **tour synthétisé** à
-partir d'un process vivant, titré avec le dernier message utilisateur de la session.
+Agent CLI turns are only written to `task_runs` once they end. A “running” task is
+therefore either an unfinished `task_runs` row, or a **synthesized turn** built from a live
+process, titled with the last user message of the session.
 
-## Coût d'un instantané
+## Cost of a snapshot
 
-Un scan `/proc`, quatre requêtes SQLite et quelques lectures de queue de fichier : 20 à 300 ms,
-~60 Mo de RSS. L'instantané est mutualisé entre tous les clients — au plus un scan toutes les
-1,5 s — et diffusé en SSE toutes les 2 s. Le service est plafonné à `MemoryMax=600M`.
+One `/proc` scan, four SQLite queries and a few file-tail reads: 20 to 300 ms, ~60 MB of
+RSS. The snapshot is shared across every client — at most one scan every 1.5 s — and pushed
+over SSE every 2 s. The service is capped at `MemoryMax=600M`.
 
 ## API
 
-- `GET /api/state` — instantané JSON complet
-- `GET /api/stream` — flux SSE, une trame toutes les 2 s
+- `GET /api/state` — full JSON snapshot
+- `GET /api/stream` — SSE stream, one frame every 2 s
 
-## Exploitation
+Snapshots carry no interface text: any label produced by the tool is emitted as a
+translation key (see `lib/i18n.ts`) and rendered by the browser in the selected language.
+
+## Operating the service
 
 ```bash
-systemctl --user status  openclaw-monitor
-systemctl --user restart openclaw-monitor
-journalctl --user -u openclaw-monitor -n 50
+systemctl --user status  openclaw-monitor      # state
+systemctl --user restart openclaw-monitor      # restart
+journalctl --user -u openclaw-monitor -n 50    # last 50 log lines
 ```
 
-## Licence
+Update to the latest version:
 
-MIT — voir [LICENSE](LICENSE).
+```bash
+git pull
+./install.sh          # rebuilds and restarts the service
+```
+
+Uninstall:
+
+```bash
+systemctl --user disable --now openclaw-monitor.service
+rm ~/.config/systemd/user/openclaw-monitor.service
+systemctl --user daemon-reload
+```
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `Cannot find module 'node:sqlite'` | Node.js older than 22.5 — upgrade Node |
+| `EADDRINUSE` on startup | port already taken — `./install.sh <other-port>` |
+| Empty tree, no agent | wrong install root — set `OPENCLAW_HOME` to the folder that holds `openclaw.json` |
+| `sqlite: …` warning in the banner | `state/openclaw.sqlite` unreadable (permissions, or gateway never started) |
+| Page stuck on “connecting to stream…” | server down or unreachable — check `journalctl --user -u openclaw-monitor` |
+| CPU shown as 0 % everywhere | the monitor only sees the processes of the user it runs as; run it as the user that owns the gateway |
+
+## License
+
+MIT — see [LICENSE](LICENSE).
