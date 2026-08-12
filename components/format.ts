@@ -1,27 +1,29 @@
-export function ago(ts: number | null | undefined, now = Date.now()): string {
+import { locale, t, type Lang } from '@/lib/i18n';
+
+export function ago(lang: Lang, ts: number | null | undefined, now = Date.now()): string {
   if (!ts) return '—';
   const d = Math.max(0, now - ts);
-  if (d < 10_000) return 'à l’instant';
-  if (d < 60_000) return `${Math.floor(d / 1000)} s`;
-  if (d < 3_600_000) return `${Math.floor(d / 60_000)} min`;
-  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)} h`;
-  return `${Math.floor(d / 86_400_000)} j`;
+  if (d < 10_000) return t(lang, 'fmt.justNow');
+  if (d < 60_000) return t(lang, 'fmt.sec', { n: Math.floor(d / 1000) });
+  if (d < 3_600_000) return t(lang, 'fmt.min', { n: Math.floor(d / 60_000) });
+  if (d < 86_400_000) return t(lang, 'fmt.hour', { n: Math.floor(d / 3_600_000) });
+  return t(lang, 'fmt.day', { n: Math.floor(d / 86_400_000) });
 }
 
-export function dur(ms: number | null | undefined): string {
+export function dur(lang: Lang, ms: number | null | undefined): string {
   if (ms == null) return '—';
   const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s} s`;
+  if (s < 60) return t(lang, 'fmt.sec', { n: s });
   const m = Math.floor(s / 60);
-  if (m < 60) return `${m} min ${s % 60} s`;
+  if (m < 60) return t(lang, 'fmt.minSec', { m, s: s % 60 });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h} h ${m % 60} min`;
-  return `${Math.floor(h / 24)} j ${h % 24} h`;
+  if (h < 24) return t(lang, 'fmt.hourMin', { h, m: m % 60 });
+  return t(lang, 'fmt.dayHour', { d: Math.floor(h / 24), h: h % 24 });
 }
 
-export function clock(ts: number | null | undefined): string {
+export function clock(lang: Lang, ts: number | null | undefined): string {
   if (!ts) return '—';
-  return new Date(ts).toLocaleString('fr-FR', {
+  return new Date(ts).toLocaleString(locale(lang), {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
@@ -30,9 +32,14 @@ export function clock(ts: number | null | undefined): string {
   });
 }
 
-export function mb(v: number): string {
-  if (v >= 1024) return `${(v / 1024).toFixed(1)} Go`;
-  return `${Math.round(v)} Mo`;
+export function mb(lang: Lang, v: number): string {
+  if (v >= 1024) return t(lang, 'fmt.gb', { v: (v / 1024).toFixed(1) });
+  return t(lang, 'fmt.mb', { v: Math.round(v) });
+}
+
+export function mbShort(lang: Lang, v: number): string {
+  if (v >= 1024) return t(lang, 'fmt.gbShort', { v: (v / 1024).toFixed(1) });
+  return t(lang, 'fmt.mbShort', { v: Math.round(v) });
 }
 
 export function lvl(pct: number): 'ok' | 'warn' | 'err' {
