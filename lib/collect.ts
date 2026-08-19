@@ -123,6 +123,104 @@ function cwdOf(pid: number): string | null {
   }
 }
 
+type AgentCfg = { id: string; workspace: string | null };
+
+/**
+ * Agent propriétaire d'un chemin, par workspace le plus spécifique. Le préfixe seul ne
+ * suffit pas : `…/workspace` préfixe `…/workspace-neo`, ce qui attribuerait à `main` le
+ * travail de `neo`.
+ */
+function agentForPath(target: string | null, agents: AgentCfg[]): string | null {
+  if (!target) return null;
+  let best: { id: string; len: number } | null = null;
+  for (const a of agents) {
+    const w = a.workspace?.replace(/\/+$/, '');
+    if (!w) continue;
+    if (target !== w && !target.startsWith(`${w}/`)) continue;
+    if (!best || w.length > best.len) best = { id: a.id, len: w.length };
+  }
+  return best?.id ?? null;
+}
+
+// ---------------------------------------------------------------- jobs détachés
+
+/** Binaire de CLI d'agent en tête de ligne de commande. */
+const CLI_BIN = /(?:^|\/)(claude|codex|gemini)(?:\s|$)/;
+
+/** Énoncé passé au CLI en mode non interactif : tout ce qui suit `--print` / `-p`. */
+function detachedPrompt(cmd: string): string | null {
+  const m = cmd.match(/\s(?:--print|-p)\s+(.+)$/s);
+  const text = (m?.[1] ?? '').trim();
+  return text && !text.startsWith('-') ? text : null;
+}
+
+/**
+ * Un CLI d'agent lancé hors du contrôle de la gateway (`systemd-run`, `nohup`) : ni enfant
+ * de la gateway, ni porteur d'un prompt système OpenClaw — les deux seules pistes que suit
+ * la détection des sessions. Sans ce filet, le travail de fond d'un agent est invisible
+ * dans l'arbre et sa consommation tombe dans « autres process ».
+ */
+type DetachedJob = { agentId: string; unit: string | null; root: RawProc; prompt: string | null; pids: number[] };
+
+function findDetached(
+  procs: Map<number, RawProc>,
+  kids: Map<number, number[]>,
+  claimed: Set<number>,
+  agents: AgentCfg[],
+  gatewayUnit: string | null,
+): DetachedJob[] {
+  const out: DetachedJob[] = [];
+  const taken = new Set<number>();
+  for (const p of procs.values()) {
+    if (claimed.has(p.pid) || taken.has(p.pid)) continue;
+    if (!CLI_BIN.test(p.cmd.split(' ')[0])) continue;
+    // un CLI relancé depuis un job déjà repéré fait partie de ce job, pas d'un nouveau
+    if (p.unit && p.unit === gatewayUnit) continue;
+
+    const cwd = cwdOf(p.pid);
+    const agentId =
+      agentForPath(cwd, agents) ??
+      agents.find((a) => a.workspace && p.cmd.includes(a.workspace))?.id ??
+      // dernier recours : unité systemd nommée d'après l'agent (« neo-fix070.service »)
+      (p.unit
+        ? agents.find((a) => {
+            const u = p.unit!.replace(/\.(service|scope)$/, '');
+            return u === a.id || u.startsWith(`${a.id}-`);
+          })?.id ?? null
+        : null);
+    if (!agentId) continue;
+
+    // l'unité systemd regroupe tout le job (serveur de dev, suite de tests…), y compris
+    // les process dont l'ancêtre commun est déjà mort ; à défaut, le sous-arbre du CLI
+    const pids = p.unit
+      ? [...procs.values()].filter((q) => q.unit === p.unit && !claimed.has(q.pid)).map((q) => q.pid)
+      : descendants(p.pid, kids).filter((pid) => !claimed.has(pid));
+    for (const pid of pids) taken.add(pid);
+    out.push({ agentId, unit: p.unit, root: p, prompt: detachedPrompt(p.cmd), pids });
+  }
+  return out;
+}
+
+function detachedTaskNode(job: DetachedJob, r: Res): TaskNode {
+  const label = job.unit?.replace(/\.(service|scope)$/, '') ?? job.root.comm;
+  return {
+    id: `detached:${job.root.pid}`,
+    kind: 'task',
+    title: job.prompt ? shortTitle(job.prompt, 74) : label,
+    detail: job.prompt ? job.prompt.slice(0, 600) : job.root.cmd.slice(0, 600),
+    state: 'running',
+    runtime: job.unit ? `systemd · ${label}` : { k: 'runtime.detached' },
+    createdAt: job.root.startedAt,
+    startedAt: job.root.startedAt,
+    endedAt: null,
+    durationMs: Date.now() - job.root.startedAt,
+    summary: { k: 'task.activeProcs', p: { n: r.procs } },
+    error: null,
+    res: r,
+    children: [],
+  };
+}
+
 // ---------------------------------------------------------------- tâches
 
 function taskState(t: TaskRow): UnitState {
@@ -294,10 +392,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
     if (!isRuntime) continue;
     const parsed = resolveFromPrompt(p.cmd);
     let agentId = parsed?.agentId ?? null;
-    if (!agentId) {
-      const cwd = cwdOf(p.pid);
-      if (cwd) agentId = agentsCfg.find((a) => a.workspace && cwd.startsWith(a.workspace))?.id ?? null;
-    }
+    if (!agentId) agentId = agentForPath(cwdOf(p.pid), agentsCfg);
     const model = parsed?.model ?? (p.cmd.match(/--model\s+(\S+)/)?.[1] ?? null);
     runtimeProcs.push({ pid: p.pid, agentId, sessionKey: parsed?.sessionKey ?? null, model });
   }
@@ -319,6 +414,20 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       arr.push(...tree);
       agentLoosePids.set(rp.agentId, arr);
     }
+  }
+
+  // --- jobs détachés (systemd-run / nohup), hors gouvernance de la gateway
+  const detachedJobs = findDetached(procs, kids, claimed, agentsCfg, procs.get(gatewayPid ?? -1)?.unit ?? null);
+  const detachedByAgent = new Map<string, DetachedJob[]>();
+  const detachedPids = new Set<number>();
+  for (const job of detachedJobs) {
+    for (const pid of job.pids) {
+      claimed.add(pid);
+      detachedPids.add(pid);
+    }
+    const arr = detachedByAgent.get(job.agentId) ?? [];
+    arr.push(job);
+    detachedByAgent.set(job.agentId, arr);
   }
 
   // --- navigateur
@@ -494,6 +603,31 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       });
     }
 
+    // jobs détachés de l'agent : pas de session OpenClaw derrière, on synthétise le nœud
+    const jobs = detachedByAgent.get(cfg.id) ?? [];
+    if (jobs.length) {
+      const pids = jobs.flatMap((j) => j.pids);
+      const jobRes = res(pids, procs);
+      built.push({
+        key: `agent:${cfg.id}:__detached`,
+        sessionId: null,
+        kind: 'main',
+        title: { k: 'session.detached' },
+        subtitle: { k: 'session.detachedJobs', p: { n: jobs.length } },
+        channel: 'detached',
+        state: 'running',
+        startedAt: Math.min(...jobs.map((j) => j.root.startedAt)),
+        lastActivityAt: now,
+        model: null,
+        prompt: jobs[0]?.prompt ?? null,
+        turns: 0,
+        res: jobRes,
+        pids,
+        tasks: jobs.map((j) => detachedTaskNode(j, res(j.pids, procs))),
+        children: [],
+      });
+    }
+
     // tâches de l'agent sans session rattachée (cron sans clé, etc.)
     const orphanTasks = (tasksByAgent.get(cfg.id) ?? []).filter(
       (t) => !(t.child_session_key || t.owner_key || t.requester_session_key),
@@ -593,6 +727,10 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       kind = 'agent-cli';
       const rp = runtimeProcs.find((r) => r.pid === p.pid);
       label = { k: 'proc.runtime', p: { id: rp?.agentId ?? '?' } };
+    } else if (detachedPids.has(p.pid)) {
+      kind = 'detached';
+      const job = detachedJobs.find((j) => j.pids.includes(p.pid));
+      label = { k: 'proc.detached', p: { id: job?.agentId ?? '?' } };
     } else if (/mcp/i.test(p.cmd)) {
       kind = 'mcp';
       label = { k: 'proc.mcp' };

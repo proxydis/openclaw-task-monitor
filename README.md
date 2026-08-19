@@ -18,6 +18,9 @@ produces: the SQLite state database, session files, transcripts and `/proc`.
   cumulative RSS of the whole process subtree attached to the unit
 - **Short task title**, extracted from the last user message of the transcript, to tell
   at a glance what the work in progress is about
+- **Detached jobs** — an agent CLI started outside the gateway (`systemd-run`, `nohup`) has
+  no OpenClaw session behind it; it is picked up from `/proc`, attributed to its agent by
+  workspace, grouped by systemd unit, and shown as a running task
 - **Machine health**: CPU, memory, swap, load, gateway uptime
 - Live detail panel, text filter, raw process tab
 - **Interface in English or French**, switchable from the `EN / FR` toggle in the top-right

@@ -38,7 +38,7 @@ export type ProcInfo = {
   cpuPct: number;
   rssMb: number;
   startedAt: number;
-  kind: 'gateway' | 'agent-cli' | 'mcp' | 'browser' | 'child' | 'other';
+  kind: 'gateway' | 'agent-cli' | 'detached' | 'mcp' | 'browser' | 'child' | 'other';
   label: Msg;
 };
 

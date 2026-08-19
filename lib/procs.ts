@@ -13,6 +13,8 @@ export type RawProc = {
   rssMb: number;
   startedAt: number;
   cpuPct: number;
+  /** unité systemd propriétaire du process (« neo-fix070.service »), via /proc/<pid>/cgroup */
+  unit: string | null;
 };
 
 let bootTimeMs = 0;
@@ -42,6 +44,22 @@ function readCmd(pid: number): string {
     return raw.toString('utf8').replace(/\0/g, ' ').trim();
   } catch {
     return '';
+  }
+}
+
+/**
+ * Unité systemd du process, dernier segment `*.service` / `*.scope` du cgroup v2.
+ * C'est le seul lien fiable entre les process d'un job détaché (`systemd-run`) : ils ne
+ * partagent pas forcément un ancêtre commun vivant, mais toujours leur unité.
+ */
+function readUnit(pid: number): string | null {
+  try {
+    const raw = fs.readFileSync(`/proc/${pid}/cgroup`, 'utf8');
+    const path = raw.split('\n')[0]?.split(':').pop() ?? '';
+    const segs = path.split('/').filter((s) => /\.(service|scope)$/.test(s));
+    return segs.length ? segs[segs.length - 1] : null;
+  } catch {
+    return null;
   }
 }
 
@@ -100,6 +118,7 @@ export function scanProcs(): Map<number, RawProc> {
       rssMb: Math.round(rssPages * PAGE_MB * 10) / 10,
       startedAt: bootTime() + (starttime / HZ) * 1000,
       cpuPct: Math.round(cpuPct * 10) / 10,
+      unit: readUnit(pid),
     });
   }
 

@@ -189,6 +189,7 @@ table.procs tr:hover td { background: var(--panel-2); }
 .tag { font-size: 10px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); }
 .tag.gateway { color: var(--accent); }
 .tag.agentcli { color: var(--ok); }
+.tag.detached { color: var(--pink); }
 .tag.mcp { color: var(--purple); }
 .tag.browser { color: var(--warn); }
 

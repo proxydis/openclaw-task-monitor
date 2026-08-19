@@ -19,6 +19,9 @@ déjà produites par OpenClaw : base d'état SQLite, fichiers de sessions, trans
   cumulé de tout le sous-arbre de process rattaché à l'unité
 - **Titre court de la tâche**, extrait du dernier message utilisateur du transcript, pour
   identifier d'un coup d'œil la nature du travail en cours
+- **Jobs détachés** — un CLI d'agent lancé hors gateway (`systemd-run`, `nohup`) n'a aucune
+  session OpenClaw derrière lui : il est repéré dans `/proc`, rattaché à son agent par le
+  workspace, regroupé par unité systemd, et affiché comme une tâche en cours
 - **Santé machine** : CPU, mémoire, swap, load, uptime de la gateway
 - Panneau de détail vivant, filtre texte, onglet des process bruts
 - **Interface en anglais ou en français**, via le sélecteur `EN / FR` en haut à droite
