@@ -109,6 +109,8 @@ Tout se règle par variables d'environnement.
 | `HOSTNAME` | `127.0.0.1` | interface d'écoute |
 | `OPENCLAW_HOME` | `~/.openclaw` | racine de l'installation supervisée |
 | `MONITOR_REDACT` | — | `1` masque tout contenu métier (voir ci-dessous) |
+| `MONITOR_PLAN_USAGE` | — | `0` désactive la carte des limites de forfait (aucun appel réseau) |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | emplacement du jeton OAuth Claude Code (lecture seule) |
 
 Avec systemd, éditer l'unité générée puis recharger :
 
