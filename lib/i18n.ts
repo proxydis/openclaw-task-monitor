@@ -88,6 +88,26 @@ const EN: Record<string, string> = {
   'kpi.gateway': 'Gateway',
   'kpi.gatewayFoot': 'browser {v} · {n} process(es)',
 
+  // limites du forfait
+  'plan.title': 'Plan usage limits',
+  'plan.weekly': 'Weekly limits',
+  'plan.limit.session': 'Current session',
+  'plan.limit.weekly_all': 'All models',
+  'plan.limit.weekly_scoped': 'Scoped model',
+  'plan.percentUsed': '{n}% used',
+  'plan.resetIn': 'Resets in {d}',
+  'plan.resetAt': 'Resets {d}',
+  'plan.resetSoon': 'Resetting now',
+  'plan.notUsedYet': "You haven't used {model} yet",
+  'plan.updated': 'Last updated: {ago}',
+  'plan.refresh': 'Refresh',
+  'plan.loading': 'Reading usage limits…',
+  'plan.empty': 'No usage limit reported.',
+  'plan.err.noSession': 'No Claude Code session detected on this host',
+  'plan.err.expired': 'Claude Code session expired — run `claude` to sign in again',
+  'plan.err.http': 'Anthropic API error (HTTP {code})',
+  'plan.err.network': 'Anthropic API unreachable ({err})',
+
   // arbre
   'panel.tree': 'Agent tree',
   'tab.tree': 'Tree',
@@ -154,6 +174,7 @@ const EN: Record<string, string> = {
 
   // formats
   'fmt.justNow': 'just now',
+  'fmt.ago': '{d} ago',
   'fmt.sec': '{n} s',
   'fmt.min': '{n} min',
   'fmt.hour': '{n} h',
@@ -238,6 +259,26 @@ const FR: Record<string, string> = {
   'kpi.gateway': 'Gateway',
   'kpi.gatewayFoot': 'navigateur {v} · {n} process',
 
+  // l'espace avant « % » est insécable (U+00A0), conformément à l'usage typographique
+  'plan.title': 'Limites d’utilisation du forfait',
+  'plan.weekly': 'Limites hebdomadaires',
+  'plan.limit.session': 'Session actuelle',
+  'plan.limit.weekly_all': 'Tous les modèles',
+  'plan.limit.weekly_scoped': 'Modèle dédié',
+  'plan.percentUsed': '{n} % utilisés',
+  'plan.resetIn': 'Réinitialisation dans {d}',
+  'plan.resetAt': 'Réinitialisation {d}',
+  'plan.resetSoon': 'Réinitialisation imminente',
+  'plan.notUsedYet': 'Vous n’avez pas encore utilisé {model}',
+  'plan.updated': 'Dernière mise à jour : {ago}',
+  'plan.refresh': 'Rafraîchir',
+  'plan.loading': 'Lecture des limites d’utilisation…',
+  'plan.empty': 'Aucune limite d’utilisation communiquée.',
+  'plan.err.noSession': 'Aucune session Claude Code détectée sur cet hôte',
+  'plan.err.expired': 'Session Claude Code expirée — relance `claude` pour te reconnecter',
+  'plan.err.http': 'Erreur API Anthropic (HTTP {code})',
+  'plan.err.network': 'API Anthropic injoignable ({err})',
+
   'panel.tree': 'Arbre des agents',
   'tab.tree': 'Arbre',
   'tab.procs': 'Process ({n})',
@@ -300,6 +341,7 @@ const FR: Record<string, string> = {
   'th.age': 'Âge',
 
   'fmt.justNow': 'à l’instant',
+  'fmt.ago': 'il y a {d}',
   'fmt.sec': '{n} s',
   'fmt.min': '{n} min',
   'fmt.hour': '{n} h',
