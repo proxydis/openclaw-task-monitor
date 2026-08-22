@@ -120,11 +120,46 @@ export type GatewayInfo = {
   version: string | null;
 };
 
+/**
+ * Une ligne de la carte « limites d'utilisation du forfait ». Reprend telle quelle
+ * une entrée de `limits[]` renvoyée par l'API Anthropic : le tableau est générique,
+ * une nouvelle limite côté serveur apparaît donc sans modification de code.
+ */
+export type PlanLimit = {
+  /** clé stable pour le rendu (kind + modèle ciblé) */
+  id: string;
+  /** `session`, `weekly_all`, `weekly_scoped`… (valeur brute de l'API) */
+  kind: string;
+  /** regroupement d'affichage ; `weekly` est précédé d'un sous-titre de section */
+  group: 'session' | 'weekly' | 'other';
+  /** « Session actuelle », « Tous les modèles », ou le nom brut du modèle ciblé */
+  label: Msg;
+  /** entier 0–100 */
+  percent: number;
+  /** `normal`, `warning`… (valeur brute de l'API) */
+  severity: string;
+  /** échéance de réinitialisation en ms epoch, `null` si l'API n'en donne pas */
+  resetsAt: number | null;
+  isActive: boolean;
+};
+
+export type PlanUsage = {
+  /** ms epoch du dernier relevé réussi, `null` tant qu'aucun n'a abouti */
+  fetchedAt: number | null;
+  /** « Max (20x) », « Pro »… ; `null` si le forfait n'est pas identifiable */
+  planLabel: string | null;
+  limits: PlanLimit[];
+  /** état dégradé (pas de session locale, jeton expiré, réseau) */
+  error: Msg | null;
+};
+
 export type Snapshot = {
   ts: number;
   collectMs: number;
   host: HostInfo;
   gateway: GatewayInfo;
+  /** `null` quand la carte est désactivée (MONITOR_PLAN_USAGE=0) */
+  plan: PlanUsage | null;
   agents: AgentNode[];
   system: {
     browser: Res;
