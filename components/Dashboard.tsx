@@ -118,13 +118,12 @@ function usePlan(snapPlan: PlanUsage | null) {
 function PlanRow({ limit, now }: { limit: PlanLimit; now: number }) {
   const { lang, t: tr, m } = useI18n();
   const name = m(limit.label);
-  // pas d'échéance et rien de consommé : le modèle n'a jamais servi
-  const sub =
-    limit.resetsAt === null
-      ? limit.percent === 0
-        ? tr('plan.notUsedYet', { model: name })
-        : null
-      : resetIn(lang, limit.resetsAt, now);
+  // limite propre à un modèle et rien de consommé : le modèle n'a pas encore servi.
+  // L'échéance existe malgré tout côté API, mais claude.ai affiche bien ce libellé-là.
+  const unused = limit.kind === 'weekly_scoped' && limit.percent === 0;
+  const sub = unused
+    ? tr('plan.notUsedYet', { model: name })
+    : resetIn(lang, limit.resetsAt, now);
   return (
     <div className="plan-row">
       <div className="plan-name">{name}</div>

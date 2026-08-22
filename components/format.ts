@@ -55,7 +55,8 @@ export function resetIn(lang: Lang, resetsAt: number | null, now = Date.now()): 
     const span = h > 0 ? t(lang, 'fmt.hourMin', { h, m: min }) : t(lang, 'fmt.min', { n: Math.max(1, min) });
     return t(lang, 'plan.resetIn', { d: span });
   }
-  const when = new Date(resetsAt).toLocaleString(locale(lang), {
+  // tronqué à la minute : sans ce plancher, Chrome arrondit 01:59:59 en « 02:00 »
+  const when = new Date(Math.floor(resetsAt / 60_000) * 60_000).toLocaleString(locale(lang), {
     weekday: 'short',
     hour: '2-digit',
     minute: '2-digit',
