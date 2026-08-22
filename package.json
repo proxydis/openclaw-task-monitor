@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3200",
     "build": "next build",
+    "postbuild": "rm -rf .next/standalone/.next/static && cp -r .next/static .next/standalone/.next/static && ([ -d public ] && cp -r public .next/standalone/public || true)",
     "start": "node .next/standalone/server.js"
   },
   "dependencies": {
