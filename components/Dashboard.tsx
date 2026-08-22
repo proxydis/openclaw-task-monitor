@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AgentNode, ProcInfo, Res, SessionNode, Snapshot, TaskNode, UnitState } from '@/lib/types';
+import type { AgentNode, PlanLimit, PlanUsage, ProcInfo, Res, SessionNode, Snapshot, TaskNode, UnitState } from '@/lib/types';
 import { agentStateLabel, stateLabel } from '@/lib/i18n';
 import { LangProvider, LangSwitch, useI18n } from './LangProvider';
-import { ago, clock, dur, lvl, mb, mbShort } from './format';
+import { ago, agoRel, clock, dur, lvl, mb, mbShort, resetIn } from './format';
 
 // ------------------------------------------------------------------ flux
 
@@ -71,6 +71,118 @@ function useSnapshot() {
   }, []);
 
   return { snap, live, err };
+}
+
+// ------------------------------------------------------------------ limites du forfait
+
+/** Horloge locale, pour que compte à rebours et « dernière mise à jour » restent vivants. */
+function useNow(periodMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), periodMs);
+    return () => clearInterval(id);
+  }, [periodMs]);
+  return now;
+}
+
+/**
+ * Rafraîchissement forcé via `/api/plan`. La valeur obtenue est conservée localement
+ * jusqu'à ce que le flux rapporte un relevé au moins aussi récent.
+ */
+function usePlan(snapPlan: PlanUsage | null) {
+  const [forced, setForced] = useState<PlanUsage | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setBusy(true);
+    try {
+      const r = await fetch('/api/plan', { cache: 'no-store' });
+      const j = (await r.json()) as PlanUsage | null;
+      if (j) setForced(j);
+    } catch {
+      /* la carte garde le dernier relevé connu */
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const plan = useMemo(() => {
+    if (!forced) return snapPlan;
+    if (!snapPlan) return forced;
+    return (snapPlan.fetchedAt ?? 0) >= (forced.fetchedAt ?? 0) ? snapPlan : forced;
+  }, [snapPlan, forced]);
+
+  return { plan, refresh, busy };
+}
+
+function PlanRow({ limit, now }: { limit: PlanLimit; now: number }) {
+  const { lang, t: tr, m } = useI18n();
+  const name = m(limit.label);
+  // pas d'échéance et rien de consommé : le modèle n'a jamais servi
+  const sub =
+    limit.resetsAt === null
+      ? limit.percent === 0
+        ? tr('plan.notUsedYet', { model: name })
+        : null
+      : resetIn(lang, limit.resetsAt, now);
+  return (
+    <div className="plan-row">
+      <div className="plan-name">{name}</div>
+      {sub ? <div className="plan-sub">{sub}</div> : null}
+      <div className="plan-gauge">
+        <span className="meter">
+          <i className={lvl(limit.percent)} style={{ width: `${limit.percent}%` }} />
+        </span>
+        <span className="plan-pct">{tr('plan.percentUsed', { n: limit.percent })}</span>
+      </div>
+    </div>
+  );
+}
+
+function PlanCard({ plan, refresh, busy }: { plan: PlanUsage; refresh: () => void; busy: boolean }) {
+  const { lang, t: tr, m } = useI18n();
+  const now = useNow(20_000);
+  const session = plan.limits.filter((l) => l.group === 'session');
+  const weekly = plan.limits.filter((l) => l.group === 'weekly');
+  const other = plan.limits.filter((l) => l.group === 'other');
+
+  return (
+    <div className="panel plan">
+      <header>
+        <h2>{tr('plan.title')}</h2>
+        {plan.planLabel ? <span className="plan-tier">{plan.planLabel}</span> : null}
+      </header>
+      <div className="body">
+        {plan.error ? <div className="plan-err">{m(plan.error)}</div> : null}
+        {!plan.limits.length && !plan.error ? (
+          <div className="empty">{plan.fetchedAt ? tr('plan.empty') : tr('plan.loading')}</div>
+        ) : null}
+        {session.map((l) => (
+          <PlanRow key={l.id} limit={l} now={now} />
+        ))}
+        {weekly.length ? <div className="section-t">{tr('plan.weekly')}</div> : null}
+        {weekly.map((l) => (
+          <PlanRow key={l.id} limit={l} now={now} />
+        ))}
+        {other.map((l) => (
+          <PlanRow key={l.id} limit={l} now={now} />
+        ))}
+      </div>
+      <div className="plan-foot">
+        <span>{tr('plan.updated', { ago: agoRel(lang, plan.fetchedAt, now) })}</span>
+        <button
+          type="button"
+          className={`plan-refresh${busy ? ' busy' : ''}`}
+          title={tr('plan.refresh')}
+          aria-label={tr('plan.refresh')}
+          disabled={busy}
+          onClick={refresh}
+        >
+          ↻
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ------------------------------------------------------------------ arbre générique
@@ -539,6 +651,7 @@ function DashboardInner() {
   const [showIdle, setShowIdle] = useState(true);
   const [showDone, setShowDone] = useState(true);
   const bootstrapped = useRef(false);
+  const { plan, refresh: refreshPlan, busy: planBusy } = usePlan(snap?.plan ?? null);
 
   // ouvre automatiquement les agents actifs au premier chargement
   useEffect(() => {
@@ -803,7 +916,10 @@ function DashboardInner() {
           <Legend />
         </div>
 
-        <Detail sel={sel} />
+        <div className="side">
+          {plan ? <PlanCard plan={plan} refresh={refreshPlan} busy={planBusy} /> : null}
+          <Detail sel={sel} />
+        </div>
       </div>
     </div>
   );
