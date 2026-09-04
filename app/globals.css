@@ -186,6 +186,12 @@ button { font: inherit; color: inherit; }
   border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.45; margin-bottom: 10px;
 }
 
+/* attente de quota : information, pas alerte — pas de couleur d'avertissement */
+.plan-note {
+  background: var(--bg-soft); border: 1px solid var(--line); color: var(--txt-faint);
+  border-radius: 8px; padding: 8px 10px; font-size: 11.5px; line-height: 1.45; margin-bottom: 10px;
+}
+
 .plan-foot {
   display: flex; align-items: center; gap: 8px; padding: 8px 14px;
   border-top: 1px solid var(--line); font-size: 11px; color: var(--txt-faint); font-family: var(--mono);

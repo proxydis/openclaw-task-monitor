@@ -144,6 +144,7 @@ function PlanCard({ plan, refresh, busy }: { plan: PlanUsage; refresh: () => voi
   const session = plan.limits.filter((l) => l.group === 'session');
   const weekly = plan.limits.filter((l) => l.group === 'weekly');
   const other = plan.limits.filter((l) => l.group === 'other');
+  const throttled = typeof plan.error === 'object' && plan.error?.k === 'plan.err.throttled';
 
   return (
     <div className="panel plan">
@@ -152,7 +153,11 @@ function PlanCard({ plan, refresh, busy }: { plan: PlanUsage; refresh: () => voi
         {plan.planLabel ? <span className="plan-tier">{plan.planLabel}</span> : null}
       </header>
       <div className="body">
-        {plan.error ? <div className="plan-err">{m(plan.error)}</div> : null}
+        {plan.error ? (
+          // un throttle est un état de fonctionnement normal, pas une panne : les jauges
+          // restent affichées, la note explique seulement pourquoi elles ne bougent plus.
+          <div className={throttled ? 'plan-note' : 'plan-err'}>{m(plan.error)}</div>
+        ) : null}
         {!plan.limits.length && !plan.error ? (
           <div className="empty">{plan.fetchedAt ? tr('plan.empty') : tr('plan.loading')}</div>
         ) : null}
@@ -174,7 +179,7 @@ function PlanCard({ plan, refresh, busy }: { plan: PlanUsage; refresh: () => voi
           className={`plan-refresh${busy ? ' busy' : ''}`}
           title={tr('plan.refresh')}
           aria-label={tr('plan.refresh')}
-          disabled={busy}
+          disabled={busy || throttled}
           onClick={refresh}
         >
           ↻

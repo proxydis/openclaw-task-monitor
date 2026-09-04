@@ -105,6 +105,7 @@ const EN: Record<string, string> = {
   'plan.empty': 'No usage limit reported.',
   'plan.err.noSession': 'No Claude Code session detected on this host',
   'plan.err.expired': 'Claude Code session expired — run `claude` to sign in again',
+  'plan.err.throttled': 'Anthropic is rate-limiting the usage endpoint — next attempt at {time}',
   'plan.err.http': 'Anthropic API error (HTTP {code})',
   'plan.err.network': 'Anthropic API unreachable ({err})',
 
@@ -276,6 +277,7 @@ const FR: Record<string, string> = {
   'plan.empty': 'Aucune limite d’utilisation communiquée.',
   'plan.err.noSession': 'Aucune session Claude Code détectée sur cet hôte',
   'plan.err.expired': 'Session Claude Code expirée — relance `claude` pour te reconnecter',
+  'plan.err.throttled': 'Anthropic limite les appels au relevé d’usage — prochaine tentative à {time}',
   'plan.err.http': 'Erreur API Anthropic (HTTP {code})',
   'plan.err.network': 'API Anthropic injoignable ({err})',
 

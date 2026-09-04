@@ -110,6 +110,7 @@ Tout se règle par variables d'environnement.
 | `OPENCLAW_HOME` | `~/.openclaw` | racine de l'installation supervisée |
 | `MONITOR_REDACT` | — | `1` masque tout contenu métier (voir ci-dessous) |
 | `MONITOR_PLAN_USAGE` | — | `0` désactive la carte des limites de forfait (aucun appel réseau) |
+| `MONITOR_PLAN_TTL_MS` | `600000` | période d'interrogation du relevé d'usage ; l'API n'accorde qu'environ un appel toutes les 5 min, descendre plus bas fait limiter le compte |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | emplacement du jeton OAuth Claude Code (lecture seule) |
 
 Avec systemd, éditer l'unité générée puis recharger :
@@ -201,6 +202,7 @@ systemctl --user daemon-reload
 |---|---|
 | `Cannot find module 'node:sqlite'` | Node.js antérieur à 22.5 — mettre Node à jour |
 | `EADDRINUSE` au démarrage | port déjà pris — `./install.sh <autre-port>` |
+| La carte du forfait affiche « Anthropic limite les appels… » | normal : le relevé d'usage n'accorde qu'environ un appel toutes les 5 min, quota partagé avec le CLI Claude. Les jauges gardent leur dernière valeur et l'interrogation repart seule ; n'augmenter `MONITOR_PLAN_TTL_MS` que si ça persiste |
 | Arbre vide, aucun agent | mauvaise racine d'installation — pointer `OPENCLAW_HOME` sur le dossier qui contient `openclaw.json` |
 | Bandeau d'avertissement `sqlite : …` | `state/openclaw.sqlite` illisible (droits, ou gateway jamais démarrée) |
 | Page bloquée sur « connexion au flux… » | serveur arrêté ou injoignable — voir `journalctl --user -u openclaw-monitor` |

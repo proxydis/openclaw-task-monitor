@@ -23,9 +23,35 @@ import type { Msg, PlanLimit, PlanUsage } from './types';
 export const PLAN_USAGE_ENABLED = process.env.MONITOR_PLAN_USAGE !== '0';
 
 const API = 'https://api.anthropic.com/api/oauth';
-const USAGE_TTL = 60_000;
+
+/**
+ * Requête d'usage telle que l'émet le CLI Claude : `skip_spend` évite au serveur le
+ * calcul de dépense, qui n'alimente aucune des jauges affichées ici.
+ */
+const USAGE_PATH = 'usage?at_wall=1&skip_spend=1';
+
+/**
+ * L'endpoint d'usage est fortement limité en débit côté Anthropic : mesuré sur un compte
+ * Max 20x, il n'accorde qu'environ une requête toutes les cinq minutes, et un 429 consomme
+ * lui aussi du quota. Interroger toutes les minutes — la valeur d'origine — suffisait à
+ * rester bloqué en permanence.
+ *
+ * Dix minutes laissent de la marge sous le seuil observé, y compris pour le CLI Claude qui
+ * puise dans le même quota, sans nuire à l'affichage : la limite de session porte sur 5 h
+ * et les limites hebdomadaires sur 7 jours.
+ */
+const USAGE_TTL = envMs('MONITOR_PLAN_TTL_MS', 10 * 60_000);
 const PROFILE_TTL = 15 * 60_000;
 const TIMEOUT_MS = 8_000;
+
+/** Paliers d'attente après un 429 : 5, 10, 20, 40 min, puis plafond à 1 h. */
+const THROTTLE_BASE = 5 * 60_000;
+const THROTTLE_MAX = 60 * 60_000;
+
+function envMs(name: string, fallback: number): number {
+  const v = Number(process.env[name]);
+  return Number.isFinite(v) && v > 0 ? v : fallback;
+}
 
 // ------------------------------------------------------------------ jeton local
 
@@ -49,7 +75,18 @@ function readToken(): string | null {
 
 // ------------------------------------------------------------------ appels HTTP
 
-type Fetched = { ok: true; body: any } | { ok: false; error: Msg };
+type Fetched =
+  | { ok: true; body: any }
+  | { ok: false; status: number; retryAfterMs: number; error: Msg };
+
+/** `Retry-After` en millisecondes (secondes ou date HTTP), 0 si absent ou nul. */
+function retryAfterMs(h: string | null): number {
+  if (!h) return 0;
+  const secs = Number(h);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const ts = Date.parse(h);
+  return Number.isFinite(ts) ? Math.max(0, ts - Date.now()) : 0;
+}
 
 /**
  * GET authentifié sur l'API OAuth. Ne lève jamais : toute panne est convertie en `Msg`.
@@ -68,11 +105,26 @@ async function oauthGet(endpoint: string, token: string): Promise<Fetched> {
       cache: 'no-store',
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (r.status === 401 || r.status === 403) return { ok: false, error: { k: 'plan.err.expired' } };
-    if (!r.ok) return { ok: false, error: { k: 'plan.err.http', p: { code: r.status } } };
+    if (!r.ok) {
+      const err: Msg =
+        r.status === 401 || r.status === 403
+          ? { k: 'plan.err.expired' }
+          : { k: 'plan.err.http', p: { code: r.status } };
+      return {
+        ok: false,
+        status: r.status,
+        retryAfterMs: retryAfterMs(r.headers.get('retry-after')),
+        error: err,
+      };
+    }
     return { ok: true, body: await r.json() };
   } catch (e: any) {
-    return { ok: false, error: { k: 'plan.err.network', p: { err: String(e?.message ?? e).slice(0, 120) } } };
+    return {
+      ok: false,
+      status: 0,
+      retryAfterMs: 0,
+      error: { k: 'plan.err.network', p: { err: String(e?.message ?? e).slice(0, 120) } },
+    };
   }
 }
 
@@ -172,6 +224,10 @@ let planLabel: string | null = null;
 let profileAt = 0;
 let profileInflight: Promise<void> | null = null;
 
+/** Fenêtre d'abstention après un 429, et rang du palier atteint. */
+let throttledUntil = 0;
+let throttleStep = 0;
+
 async function fetchUsage(): Promise<void> {
   const token = readToken();
   if (!token) {
@@ -179,12 +235,21 @@ async function fetchUsage(): Promise<void> {
     usageAt = Date.now();
     return;
   }
-  const r = await oauthGet('usage', token);
-  if (!r.ok) {
+  const r = await oauthGet(USAGE_PATH, token);
+  if (r.ok) {
+    throttledUntil = 0;
+    throttleStep = 0;
+    usage = { fetchedAt: Date.now(), limits: toLimits(r.body), error: null };
+  } else if (r.status === 429) {
+    // Un 429 consomme du quota : on se tait pendant tout le palier plutôt que d'insister,
+    // sinon le compteur ne redescend jamais. Les dernières limites connues restent affichées.
+    throttleStep = Math.min(throttleStep + 1, 4);
+    const backoff = Math.min(THROTTLE_BASE * 2 ** (throttleStep - 1), THROTTLE_MAX);
+    throttledUntil = Date.now() + Math.max(backoff, r.retryAfterMs);
+    usage = { ...usage, error: { k: 'plan.err.throttled', ts: throttledUntil } };
+  } else {
     // on garde les dernières limites connues : une coupure réseau ne vide pas la carte
     usage = { ...usage, error: r.error };
-  } else {
-    usage = { fetchedAt: Date.now(), limits: toLimits(r.body), error: null };
   }
   usageAt = Date.now();
 }
@@ -230,14 +295,19 @@ function snapshot(): PlanUsage {
 export function getPlanUsage(): PlanUsage | null {
   if (!PLAN_USAGE_ENABLED) return null;
   const now = Date.now();
-  if (now - usageAt >= USAGE_TTL) void refreshUsage().catch(() => {});
+  if (now >= throttledUntil && now - usageAt >= USAGE_TTL) void refreshUsage().catch(() => {});
   if (now - profileAt >= PROFILE_TTL) void refreshProfile().catch(() => {});
   return snapshot();
 }
 
-/** Rafraîchissement forcé, pour le bouton ↻ de la carte (route `/api/plan`). */
+/**
+ * Rafraîchissement forcé, pour le bouton ↻ de la carte (route `/api/plan`).
+ * Le bouton ne perce pas la fenêtre d'abstention : pendant un throttle, il rend le
+ * dernier relevé et l'heure de la prochaine tentative, sans appel réseau.
+ */
 export async function refreshPlanUsage(): Promise<PlanUsage | null> {
   if (!PLAN_USAGE_ENABLED) return null;
+  if (Date.now() < throttledUntil) return snapshot();
   usageAt = 0;
   profileAt = 0;
   await Promise.all([refreshUsage().catch(() => {}), refreshProfile().catch(() => {})]);
