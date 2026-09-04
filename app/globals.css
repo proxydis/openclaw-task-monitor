@@ -102,6 +102,16 @@ button { font: inherit; color: inherit; }
 .tab:hover { color: var(--txt); background: var(--panel-2); }
 .tab.on { color: var(--txt); background: var(--panel-2); border-color: var(--line); }
 
+/* dépliage global de l'arbre */
+.tree-all {
+  background: transparent; border: 1px solid var(--line); border-radius: 7px;
+  color: var(--txt-faint); cursor: pointer; width: 26px; height: 26px; flex: none;
+  display: grid; place-items: center; font-size: 13px; line-height: 1;
+}
+.tree-all:hover:not(:disabled) { color: var(--txt); background: var(--panel-2); }
+.tree-all:disabled { opacity: .4; cursor: default; }
+.tree-all:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 .search {
   background: var(--bg-soft); border: 1px solid var(--line); color: var(--txt);
   border-radius: 7px; padding: 5px 9px; font-size: 12.5px; width: 190px; outline: none;

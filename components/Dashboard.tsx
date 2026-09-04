@@ -644,6 +644,26 @@ function Legend() {
 
 // ------------------------------------------------------------------ page
 
+/**
+ * Identifiants de tous les nœuds dépliables de l'arbre, pour le bouton « tout déplier ».
+ * Les filtres d'affichage sont volontairement ignorés : ouvrir un nœud masqué ne coûte
+ * rien, et le dépliage reste alors valable si l'on rétablit les filtres ensuite.
+ */
+function expandableIds(agents: AgentNode[]): string[] {
+  const ids: string[] = [];
+  const walk = (sessions: SessionNode[]) => {
+    for (const s of sessions) {
+      if (s.children.length || s.tasks.length) ids.push(`s:${s.key}`);
+      walk(s.children);
+    }
+  };
+  for (const a of agents) {
+    if (a.sessions.length) ids.push(`a:${a.id}`);
+    walk(a.sessions);
+  }
+  return ids;
+}
+
 function DashboardInner() {
   const { lang, t: tr, m } = useI18n();
   const { snap, live, err } = useSnapshot();
@@ -695,6 +715,14 @@ function DashboardInner() {
     const needle = q.trim().toLowerCase();
     return (s: string) => (needle ? s.toLowerCase().includes(needle) : true);
   }, [q]);
+
+  // Bouton unique : il replie si tout est déjà déplié, il déplie sinon. Un nœud
+  // apparu depuis le dernier dépliage suffit à le remettre en mode « tout déplier ».
+  const allIds = useMemo(() => (snap ? expandableIds(snap.agents) : []), [snap]);
+  const allOpen = allIds.length > 0 && allIds.every((id) => open.has(id));
+  const toggleAll = useCallback(() => {
+    setOpen(allOpen ? new Set<string>() : new Set(allIds));
+  }, [allOpen, allIds]);
 
   if (!snap) {
     return (
@@ -834,6 +862,19 @@ function DashboardInner() {
                 {tr('tab.procs', { n: snap.procs.length })}
               </button>
             </div>
+            {tab === 'tree' ? (
+              <button
+                type="button"
+                className="tree-all"
+                title={tr(allOpen ? 'tree.collapseAll' : 'tree.expandAll')}
+                aria-label={tr(allOpen ? 'tree.collapseAll' : 'tree.expandAll')}
+                aria-expanded={allOpen}
+                disabled={!allIds.length}
+                onClick={toggleAll}
+              >
+                {allOpen ? '⊟' : '⊞'}
+              </button>
+            ) : null}
             <input className="search" placeholder={tr('ui.filter')} value={q} onChange={(e) => setQ(e.target.value)} />
             <label className="toggle">
               <input type="checkbox" checked={runningOnly} onChange={(e) => setRunningOnly(e.target.checked)} />
