@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
-import { childIndex, descendants, getHostCpuPct, readMemInfo, scanProcs, type RawProc } from './procs';
+import { childIndex, descendants, getHostCpuPct, readMemInfo, scanProcs, unitOfPid, type RawProc } from './procs';
 import { collectSystemdJobs, jobCommand, type SystemdJob } from './systemd-jobs';
 import {
   OC_HOME,
@@ -310,6 +310,76 @@ function systemdJobNode(j: SystemdJob, r: Res): TaskNode {
   };
 }
 
+/** Binaire de CLI d'agent : la signature d'un vrai travail, pas d'un process d'ambiance. */
+const CLI_BIN = /(?:^|\/)(claude|codex|gemini)(?:\s|$)/;
+
+type DetachedJob = { agentId: string; root: RawProc; pids: number[] };
+
+/** Agent propriétaire d'un workspace cité quelque part dans un texte ; le plus long gagne. */
+function agentByPathInText(text: string, agentsCfg: AgentCfg[]): string | null {
+  let best: { id: string; len: number } | null = null;
+  for (const a of agentsCfg) {
+    if (!a.workspace) continue;
+    const ws = `${a.workspace.replace(/\/+$/, '')}/`;
+    if (text.includes(ws) && (!best || ws.length > best.len)) best = { id: a.id, len: ws.length };
+  }
+  return best?.id ?? null;
+}
+
+/**
+ * Jobs détachés sans unité systemd — `nohup`, `setsid`, `disown`. Leur signature est la
+ * réparentation : le parent a disparu, donc l'arbre ne remonte plus ni à la gateway ni à
+ * un service. Sans ce filet, seul le `systemd-run` était visible.
+ */
+function findDetachedJobs(
+  procs: Map<number, RawProc>,
+  kids: Map<number, number[]>,
+  claimed: Set<number>,
+  unitJobs: Set<string>,
+  agentsCfg: AgentCfg[],
+): DetachedJob[] {
+  const out: DetachedJob[] = [];
+  // parents d'abord : un descendant d'un job déjà retenu ne doit pas ouvrir un second job
+  const roots = [...procs.values()].sort((a, b) => a.startedAt - b.startedAt);
+  for (const p of roots) {
+    if (claimed.has(p.pid)) continue;
+    // réparentation : init, ou le gestionnaire `systemd --user` qui est subreaper ici
+    const parent = procs.get(p.ppid);
+    if (p.ppid > 1 && parent && parent.comm !== 'systemd') continue;
+    // un job `nohup` hérite du cgroup de qui l'a lancé (souvent celui de la gateway) :
+    // seule l'appartenance à une unité déjà rendue comme job doit exclure
+    const unit = unitOfPid(p.pid);
+    if (unit && unitJobs.has(unit)) continue;
+    const agentId =
+      agentByCwd(cwdOf(p.pid), agentsCfg) ?? agentByPathInText(p.cmd, agentsCfg);
+    if (!agentId) continue;
+    const tree = descendants(p.pid, kids).filter((pid) => !claimed.has(pid));
+    if (!tree.some((pid) => CLI_BIN.test(procs.get(pid)?.cmd ?? ''))) continue;
+    for (const pid of tree) claimed.add(pid);
+    out.push({ agentId, root: p, pids: tree });
+  }
+  return out;
+}
+
+function detachedJobNode(j: DetachedJob, r: Res): TaskNode {
+  return {
+    id: `detached:${j.root.pid}`,
+    kind: 'task',
+    title: shortTitle(j.root.cmd.split(' ')[0].split('/').pop() || j.root.comm, 60),
+    detail: shortTitle(j.root.cmd, 220),
+    state: 'running',
+    runtime: { k: 'runtime.detached' },
+    createdAt: j.root.startedAt,
+    startedAt: j.root.startedAt,
+    endedAt: null,
+    durationMs: Date.now() - j.root.startedAt,
+    summary: { k: 'job.detachedProcs', p: { n: r.procs, pid: j.root.pid } },
+    error: null,
+    res: r,
+    children: [],
+  };
+}
+
 // ---------------------------------------------------------------- collecte
 
 /**
@@ -430,6 +500,18 @@ export function collect(opts: { window?: number } = {}): Snapshot {
     gatewayRes = res(own, procs);
     const gp = procs.get(gatewayPid);
     gatewayUptime = gp ? Math.round((Date.now() - gp.startedAt) / 1000) : null;
+  }
+
+  // --- jobs détachés sans unité : `claimed` n'est complet qu'après gateway et navigateur
+  const detachedByAgent = new Map<string, DetachedJob[]>();
+  {
+    const unitJobs = new Set<string>();
+    for (const arr of jobsByAgent.values()) for (const j of arr) unitJobs.add(j.unit);
+    for (const d of findDetachedJobs(procs, kids, claimed, unitJobs, agentsCfg)) {
+      const arr = detachedByAgent.get(d.agentId) ?? [];
+      arr.push(d);
+      detachedByAgent.set(d.agentId, arr);
+    }
   }
 
   // --- index des données
@@ -623,8 +705,12 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       const end = j.endedAt ?? j.startedAt ?? 0;
       return end > 0 && now - end < 2 * 3600 * 1000;
     });
-    if (jobs.length) {
-      const jobNodes = jobs.map((j) => systemdJobNode(j, res(j.pids, procs)));
+    const detached = detachedByAgent.get(cfg.id) ?? [];
+    if (jobs.length || detached.length) {
+      const jobNodes = [
+        ...jobs.map((j) => systemdJobNode(j, res(j.pids, procs))),
+        ...detached.map((d) => detachedJobNode(d, res(d.pids, procs))),
+      ];
       const jobRes = jobNodes.reduce((a, t) => addRes(a, t.res), ZERO_RES);
       const jobsRunning = jobNodes.some((t) => t.state === 'running');
       built.push({
@@ -635,16 +721,16 @@ export function collect(opts: { window?: number } = {}): Snapshot {
         subtitle: { k: 'session.bgJobsSub', p: { n: jobNodes.filter((t) => t.state === 'running').length } },
         channel: 'systemd',
         state: jobsRunning ? 'running' : 'idle',
-        startedAt: jobs.reduce<number | null>(
-          (a, j) => (j.startedAt && (a === null || j.startedAt < a) ? j.startedAt : a),
+        startedAt: jobNodes.reduce<number | null>(
+          (a, t) => (t.startedAt && (a === null || t.startedAt < a) ? t.startedAt : a),
           null,
         ),
-        lastActivityAt: jobs.reduce((a, j) => Math.max(a, j.endedAt ?? j.startedAt ?? 0), 0) || null,
+        lastActivityAt: jobNodes.reduce((a, t) => Math.max(a, t.endedAt ?? t.startedAt ?? 0), 0) || null,
         model: null,
         prompt: null,
         turns: 0,
         res: jobRes,
-        pids: jobs.flatMap((j) => j.pids),
+        pids: [...jobs.flatMap((j) => j.pids), ...detached.flatMap((d) => d.pids)],
         tasks: jobNodes,
         children: [],
       });
