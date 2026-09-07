@@ -165,7 +165,7 @@ export function unitOfPid(pid: number): string | null {
     // neo-temsi2.service` appartient à `neo-temsi2`, pas au gestionnaire de session
     const services = raw.split('/').filter((s) => s.endsWith('.service'));
     const last = services.at(-1);
-    return last ? last.replace(/\\x2d/g, '-') : null;
+    return last ? last.replaceAll('\\x2d', '-') : null;
   } catch {
     return null;
   }

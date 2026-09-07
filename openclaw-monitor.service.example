@@ -13,6 +13,9 @@ Environment=PORT=3200
 # to the agents. Only switch to 0.0.0.0 on a trusted network.
 Environment=HOSTNAME=127.0.0.1
 Environment=NODE_OPTIONS=--max-old-space-size=320
+# Do NOT set TZ here. systemd reports unit timestamps as local wall-clock time with a
+# timezone abbreviation that Date cannot parse, so background-job start/end times are read
+# in this process's timezone. Forcing TZ would silently shift every job timestamp.
 # Uncomment to mask all business content (screenshots, demos):
 # Environment=MONITOR_REDACT=1
 ExecStart=__NODE__ __APP_DIR__/.next/standalone/server.js
