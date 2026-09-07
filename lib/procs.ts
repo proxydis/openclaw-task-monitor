@@ -153,6 +153,24 @@ export function readMemInfo() {
   };
 }
 
+/**
+ * Unité systemd d'un process, lue dans son cgroup. Seul lien fiable vers l'unité pour un
+ * job dont l'ancêtre commun est mort ; `null` pour un process hors unité (nohup depuis un
+ * terminal, où le cgroup est un `.scope` de session).
+ */
+export function unitOfPid(pid: number): string | null {
+  try {
+    const raw = fs.readFileSync(`/proc/${pid}/cgroup`, 'utf8').split('\n')[0];
+    // le dernier segment `.service` est l'unité du process : `…/user@1000.service/app.slice/
+    // neo-temsi2.service` appartient à `neo-temsi2`, pas au gestionnaire de session
+    const services = raw.split('/').filter((s) => s.endsWith('.service'));
+    const last = services.at(-1);
+    return last ? last.replaceAll('\\x2d', '-') : null;
+  } catch {
+    return null;
+  }
+}
+
 /** index pid -> enfants directs */
 export function childIndex(procs: Map<number, RawProc>): Map<number, number[]> {
   const idx = new Map<number, number[]>();
