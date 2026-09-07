@@ -58,12 +58,89 @@ export type SessionMeta = {
   updatedAt: number | null;
   startedAt: number | null;
   lastInteractionAt: number | null;
-  sessionFile: string | null;
+  transcript: TranscriptRef | null;
 };
 
-const sessCache = new Map<string, { mtime: number; data: Map<string, SessionMeta> }>();
+/** Base par agent (OpenClaw >= 2026.9.2) : sessions et transcripts migrés du disque vers SQLite. */
+function agentDbPath(agentId: string): string {
+  return path.join(OC_HOME, 'agents', agentId, 'agent', 'openclaw-agent.sqlite');
+}
+
+/** Où lire le transcript d'une session : base par agent (nouveau) ou fichier `.jsonl` (ancien). */
+export type TranscriptRef =
+  | { kind: 'sqlite'; db: string; sessionId: string }
+  | { kind: 'file'; file: string };
+
+const sessCache = new Map<string, { sig: string; data: Map<string, SessionMeta> }>();
+
+/** `entry_json` de `session_nodes` a la même forme que les anciennes valeurs de `sessions.json`. */
+function toSessionMeta(key: string, entry: any, transcript: TranscriptRef | null, sessionId?: string | null): SessionMeta {
+  return {
+    key,
+    sessionId: entry?.sessionId ?? sessionId ?? null,
+    displayName: entry?.displayName ?? null,
+    // le canal a migré sous `delivery`; les deux anciens emplacements restent en repli
+    channel:
+      entry?.delivery?.route?.channel ??
+      entry?.delivery?.origin?.provider ??
+      entry?.channel ??
+      entry?.lastChannel ??
+      null,
+    chatType: entry?.chatType ?? null,
+    groupChannel: entry?.groupChannel ?? entry?.origin?.label ?? entry?.delivery?.origin?.label ?? null,
+    updatedAt: entry?.updatedAt ?? null,
+    startedAt: entry?.sessionStartedAt ?? null,
+    lastInteractionAt: entry?.lastInteractionAt ?? entry?.updatedAt ?? null,
+    transcript,
+  };
+}
 
 export function readSessions(agentId: string): Map<string, SessionMeta> {
+  const dbFile = agentDbPath(agentId);
+  if (fs.existsSync(dbFile)) return readSessionsDb(agentId, dbFile);
+  return readSessionsJson(agentId);
+}
+
+/** Sessions lues dans `session_nodes`. Cache indexé sur (max `updated_at`, nombre de lignes). */
+function readSessionsDb(agentId: string, dbFile: string): Map<string, SessionMeta> {
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbFile, { readOnly: true });
+    const head = db.prepare('select max(updated_at) as mx, count(*) as n from session_nodes').get() as any;
+    const sig = `db:${head?.mx ?? 0}:${head?.n ?? 0}`;
+    const hit = sessCache.get(agentId);
+    if (hit && hit.sig === sig) return hit.data;
+
+    const data = new Map<string, SessionMeta>();
+    const rows = db
+      .prepare('select session_key, current_session_id, entry_json from session_nodes')
+      .all() as unknown as { session_key: string; current_session_id: string; entry_json: string }[];
+    for (const r of rows) {
+      let entry: any;
+      try {
+        entry = JSON.parse(r.entry_json);
+      } catch {
+        continue;
+      }
+      const sessionId = entry?.sessionId ?? r.current_session_id ?? null;
+      const transcript: TranscriptRef | null = sessionId ? { kind: 'sqlite', db: dbFile, sessionId } : null;
+      data.set(r.session_key, toSessionMeta(r.session_key, entry, transcript, sessionId));
+    }
+    sessCache.set(agentId, { sig, data });
+    return data;
+  } catch {
+    return new Map();
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* noop */
+    }
+  }
+}
+
+/** Ancien emplacement (OpenClaw < 2026.9.2), conservé tant que la base par agent est absente. */
+function readSessionsJson(agentId: string): Map<string, SessionMeta> {
   const file = path.join(OC_HOME, 'agents', agentId, 'sessions', 'sessions.json');
   let mtime = 0;
   try {
@@ -71,30 +148,21 @@ export function readSessions(agentId: string): Map<string, SessionMeta> {
   } catch {
     return new Map();
   }
+  const sig = `json:${mtime}`;
   const hit = sessCache.get(agentId);
-  if (hit && hit.mtime === mtime) return hit.data;
+  if (hit && hit.sig === sig) return hit.data;
 
   const data = new Map<string, SessionMeta>();
   try {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
     for (const [key, v] of Object.entries<any>(raw)) {
-      data.set(key, {
-        key,
-        sessionId: v?.sessionId ?? null,
-        displayName: v?.displayName ?? null,
-        channel: v?.channel ?? v?.lastChannel ?? null,
-        chatType: v?.chatType ?? null,
-        groupChannel: v?.groupChannel ?? v?.origin?.label ?? null,
-        updatedAt: v?.updatedAt ?? null,
-        startedAt: v?.sessionStartedAt ?? null,
-        lastInteractionAt: v?.lastInteractionAt ?? v?.updatedAt ?? null,
-        sessionFile: v?.sessionFile ?? null,
-      });
+      const transcript: TranscriptRef | null = v?.sessionFile ? { kind: 'file', file: v.sessionFile } : null;
+      data.set(key, toSessionMeta(key, v, transcript));
     }
   } catch {
     /* noop */
   }
-  sessCache.set(agentId, { mtime, data });
+  sessCache.set(agentId, { sig, data });
   return data;
 }
 
@@ -107,6 +175,8 @@ export type Transcript = {
 
 const EMPTY_TRANSCRIPT: Transcript = { prompt: null, promptAt: null, lastMessageAt: null, userTurns: 0 };
 const trCache = new Map<string, { sig: string; data: Transcript }>();
+/** Fenêtre de lecture, équivalente aux derniers 512 Ko lus dans l'ancien `.jsonl`. */
+const MAX_EVENTS = 200;
 
 function textOf(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -118,16 +188,95 @@ function textOf(content: unknown): string {
   return '';
 }
 
+/** Accumule un évènement de transcript, du plus récent au plus ancien. */
+function applyEvent(data: Transcript, o: any): void {
+  if (o?.type !== 'message' || !o?.message) return;
+  const ts = o.timestamp ? Date.parse(o.timestamp) : null;
+  if (data.lastMessageAt === null && ts) data.lastMessageAt = ts;
+  if (o.message.role !== 'user') return;
+  data.userTurns++;
+  if (data.prompt) return;
+  const txt = textOf(o.message.content)
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ' ')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!txt || txt.length < 3) return;
+  // placeholder interne : en mode démo, `redactSnapshot` remet ce champ à null de toute façon
+  data.prompt = REDACT ? `redacted prompt (${txt.length} chars)` : txt.slice(0, 600);
+  data.promptAt = ts;
+}
+
 /** Dernier prompt utilisateur d'une session, lu dans la queue du transcript (aucun appel modèle). */
-export function readTranscript(file: string | null): Transcript {
-  if (!file) return EMPTY_TRANSCRIPT;
+export function readTranscript(ref: TranscriptRef | null): Transcript {
+  if (!ref) return EMPTY_TRANSCRIPT;
+  return ref.kind === 'sqlite' ? readTranscriptDb(ref.db, ref.sessionId) : readTranscriptFile(ref.file);
+}
+
+/**
+ * Transcript lu dans `transcript_events`, restreint à la branche active de la session
+ * (`session_transcript_active_events`). Cache indexé sur le max de `seq`.
+ */
+function readTranscriptDb(dbFile: string, sessionId: string): Transcript {
+  const cacheKey = `${dbFile}#${sessionId}`;
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbFile, { readOnly: true });
+    const head = db.prepare('select max(seq) as mx from transcript_events where session_id = ?').get(sessionId) as any;
+    if (head?.mx == null) return EMPTY_TRANSCRIPT;
+    const sig = `db:${head.mx}`;
+    const hit = trCache.get(cacheKey);
+    if (hit && hit.sig === sig) return hit.data;
+
+    let rows = db
+      .prepare(
+        `select e.event_json as event_json
+         from session_transcript_active_events a
+         join transcript_events e on e.session_id = a.session_id and e.seq = a.event_seq
+         where a.session_id = ?
+         order by a.active_position desc limit ?`,
+      )
+      .all(sessionId, MAX_EVENTS) as unknown as { event_json: string }[];
+    // sessions antérieures au suivi de branche : on retombe sur le transcript brut
+    if (!rows.length) {
+      rows = db
+        .prepare('select event_json from transcript_events where session_id = ? order by seq desc limit ?')
+        .all(sessionId, MAX_EVENTS) as unknown as { event_json: string }[];
+    }
+
+    const data: Transcript = { ...EMPTY_TRANSCRIPT };
+    for (const r of rows) {
+      let o: any;
+      try {
+        o = JSON.parse(r.event_json);
+      } catch {
+        continue;
+      }
+      applyEvent(data, o);
+    }
+    trCache.set(cacheKey, { sig, data });
+    if (trCache.size > 200) trCache.clear();
+    return data;
+  } catch {
+    return EMPTY_TRANSCRIPT;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* noop */
+    }
+  }
+}
+
+/** Ancien emplacement (OpenClaw < 2026.9.2) : queue du fichier `.jsonl`. */
+function readTranscriptFile(file: string): Transcript {
   let st: fs.Stats;
   try {
     st = fs.statSync(file);
   } catch {
     return EMPTY_TRANSCRIPT;
   }
-  const sig = `${st.mtimeMs}:${st.size}`;
+  const sig = `file:${st.mtimeMs}:${st.size}`;
   const hit = trCache.get(file);
   if (hit && hit.sig === sig) return hit.data;
 
@@ -153,21 +302,7 @@ export function readTranscript(file: string | null): Transcript {
       } catch {
         continue;
       }
-      if (o?.type !== 'message' || !o?.message) continue;
-      const ts = o.timestamp ? Date.parse(o.timestamp) : null;
-      if (data.lastMessageAt === null && ts) data.lastMessageAt = ts;
-      if (o.message.role !== 'user') continue;
-      data.userTurns++;
-      if (data.prompt) continue;
-      let txt = textOf(o.message.content)
-        .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ' ')
-        .replace(/```[\s\S]*?```/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (!txt || txt.length < 3) continue;
-      // placeholder interne : en mode démo, `redactSnapshot` remet ce champ à null de toute façon
-      data.prompt = REDACT ? `redacted prompt (${txt.length} chars)` : txt.slice(0, 600);
-      data.promptAt = ts;
+      applyEvent(data, o);
     }
   } catch {
     /* noop */

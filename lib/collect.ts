@@ -456,7 +456,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       const pids = sessionPids.get(key) ?? [];
       const live = pids.length > 0;
       const r = res(pids, procs);
-      const tr = readTranscript(meta?.sessionFile ?? null);
+      const tr = readTranscript(meta?.transcript ?? null);
       const tasks = (tasksBySession.get(key) ?? []).map((t) => toTaskNode(t, r));
       if (live && !tasks.some((t) => t.state === 'running')) {
         tasks.unshift(liveTurnNode(key, tr.prompt, pids, r, procs));
