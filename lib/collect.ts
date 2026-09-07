@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import { childIndex, descendants, getHostCpuPct, readMemInfo, scanProcs, type RawProc } from './procs';
+import { collectSystemdJobs, jobCommand, type SystemdJob } from './systemd-jobs';
 import {
+  OC_HOME,
   REDACT,
   readAgents,
   readCliSessionIndex,
@@ -274,6 +276,40 @@ function cronNode(c: CronRow): TaskNode {
   };
 }
 
+/**
+ * Job détaché `systemd-run` d'un agent. Vivant tant que son cgroup porte des process ;
+ * `Result` tranche ensuite entre fin propre, échec et kill (OOM, signal, timeout).
+ */
+function systemdJobNode(j: SystemdJob, r: Res): TaskNode {
+  const live = j.activeState === 'active' || j.activeState === 'activating';
+  let st: UnitState;
+  if (live) st = 'running';
+  else if (j.activeState === 'failed' || /exit-code|core-dump|protocol|resources/.test(j.result)) st = 'failed';
+  else if (/signal|oom-kill|timeout|watchdog/.test(j.result)) st = 'killed';
+  else if (j.result === 'success') st = 'done';
+  else st = 'unknown';
+  const startedAt = j.startedAt ?? null;
+  const endedAt = live ? null : j.endedAt;
+  return {
+    id: `systemd:${j.unit}`,
+    kind: 'task',
+    title: j.unit.replace(/\.service$/, ''),
+    detail: shortTitle(jobCommand(j), 220),
+    state: st,
+    runtime: { k: 'runtime.systemd' },
+    createdAt: startedAt,
+    startedAt,
+    endedAt,
+    durationMs: startedAt ? (endedAt ?? Date.now()) - startedAt : null,
+    summary: live
+      ? { k: 'job.activeProcs', p: { n: r.procs, unit: j.unit } }
+      : { k: 'job.result', p: { result: j.result || j.subState } },
+    error: st === 'failed' || st === 'killed' ? { k: 'job.ended', p: { result: j.result || j.subState } } : null,
+    res: live ? r : ZERO_RES,
+    children: [],
+  };
+}
+
 // ---------------------------------------------------------------- collecte
 
 /**
@@ -318,6 +354,14 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   const db = readDb(opts.window ?? 72 * 3600 * 1000);
   const agentsCfg = readAgents();
   const warnings: Msg[] = [];
+
+  // --- jobs détachés (systemd-run), invisibles du store OpenClaw
+  const jobsByAgent = new Map<string, SystemdJob[]>();
+  for (const j of collectSystemdJobs(agentsCfg, OC_HOME)) {
+    const arr = jobsByAgent.get(j.agentId) ?? [];
+    arr.push(j);
+    jobsByAgent.set(j.agentId, arr);
+  }
   // une entrée par table en défaut : l'avertissement nomme la table cassée
   for (const e of db.errors) warnings.push({ k: 'warn.sqlite', p: { table: e.table, err: e.message } });
 
@@ -569,6 +613,39 @@ export function collect(opts: { window?: number } = {}): Snapshot {
         res: ZERO_RES,
         pids: [],
         tasks,
+        children: [],
+      });
+    }
+
+    // jobs détachés de l'agent : tout ce qui tourne, plus les fins des 2 dernières heures
+    const jobs = (jobsByAgent.get(cfg.id) ?? []).filter((j) => {
+      if (j.pids.length || j.activeState === 'active' || j.activeState === 'activating') return true;
+      const end = j.endedAt ?? j.startedAt ?? 0;
+      return end > 0 && now - end < 2 * 3600 * 1000;
+    });
+    if (jobs.length) {
+      const jobNodes = jobs.map((j) => systemdJobNode(j, res(j.pids, procs)));
+      const jobRes = jobNodes.reduce((a, t) => addRes(a, t.res), ZERO_RES);
+      const jobsRunning = jobNodes.some((t) => t.state === 'running');
+      built.push({
+        key: `agent:${cfg.id}:__jobs`,
+        sessionId: null,
+        kind: 'main',
+        title: { k: 'session.bgJobs' },
+        subtitle: { k: 'session.bgJobsSub', p: { n: jobNodes.filter((t) => t.state === 'running').length } },
+        channel: 'systemd',
+        state: jobsRunning ? 'running' : 'idle',
+        startedAt: jobs.reduce<number | null>(
+          (a, j) => (j.startedAt && (a === null || j.startedAt < a) ? j.startedAt : a),
+          null,
+        ),
+        lastActivityAt: jobs.reduce((a, j) => Math.max(a, j.endedAt ?? j.startedAt ?? 0), 0) || null,
+        model: null,
+        prompt: null,
+        turns: 0,
+        res: jobRes,
+        pids: jobs.flatMap((j) => j.pids),
+        tasks: jobNodes,
         children: [],
       });
     }
