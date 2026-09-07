@@ -270,7 +270,8 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   const db = readDb(opts.window ?? 72 * 3600 * 1000);
   const agentsCfg = readAgents();
   const warnings: Msg[] = [];
-  if (db.error) warnings.push({ k: 'warn.sqlite', p: { err: db.error } });
+  // une entrée par table en défaut : l'avertissement nomme la table cassée
+  for (const e of db.errors) warnings.push({ k: 'warn.sqlite', p: { table: e.table, err: e.message } });
 
   // --- gateway + navigateur
   let gatewayPid: number | null = null;

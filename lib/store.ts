@@ -386,61 +386,199 @@ export type CronRow = {
   last_duration_ms: number | null;
 };
 
+
+/** Une table dont la requête a échoué (schéma changé, table absente, base verrouillée…). */
+export type DbError = { table: string; message: string };
+
 export type DbSnapshot = {
   tasks: TaskRow[];
   subagents: SubagentRow[];
   flows: FlowRow[];
   crons: CronRow[];
+  /** Une entrée par table en défaut : les autres tables restent servies. */
+  errors: DbError[];
+  /** Résumé concaténé de `errors` (null si tout va bien), pour les appelants qui veulent un texte. */
   error: string | null;
 };
 
-const EMPTY: DbSnapshot = { tasks: [], subagents: [], flows: [], crons: [], error: null };
+function errText(e: unknown): string {
+  return String((e as any)?.message ?? e);
+}
+
+function summarize(errors: DbError[]): string | null {
+  return errors.length ? errors.map((e) => `${e.table}: ${e.message}`).join(' · ') : null;
+}
+
+function failedSnapshot(table: string, message: string): DbSnapshot {
+  const errors: DbError[] = [{ table, message }];
+  return { tasks: [], subagents: [], flows: [], crons: [], errors, error: summarize(errors) };
+}
+
+/** `JSON.parse` tolérant : une ligne au JSON invalide ne doit jamais faire tomber la requête entière. */
+function parseJson(raw: unknown): any {
+  if (typeof raw !== 'string' || !raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function asNum(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+function asStr(v: unknown): string | null {
+  return typeof v === 'string' && v ? v : null;
+}
+
+/**
+ * `subagent_runs` (OpenClaw >= 2026.9.2) : six colonnes, tout le détail est passé
+ * dans le blob `payload_json`. On reconstruit `SubagentRow` à l'identique pour l'aval.
+ */
+type SubagentDbRow = {
+  run_id: string;
+  child_session_key: string | null;
+  requester_session_key: string | null;
+  created_at: number;
+  payload_json: string | null;
+};
+
+function toSubagentRow(r: SubagentDbRow): SubagentRow {
+  const p = parseJson(r.payload_json) ?? {};
+  const exec = p?.execution ?? {};
+  return {
+    run_id: r.run_id,
+    child_session_key: r.child_session_key ?? asStr(p?.childSessionKey) ?? '',
+    requester_session_key: r.requester_session_key ?? asStr(p?.requesterSessionKey) ?? '',
+    task: asStr(p?.task) ?? '',
+    task_name: asStr(p?.taskName),
+    label: asStr(p?.label),
+    model: asStr(p?.model),
+    workspace_dir: asStr(p?.workspaceDir),
+    spawn_mode: asStr(p?.spawnMode),
+    created_at: r.created_at,
+    started_at: asNum(exec?.startedAt) ?? asNum(p?.sessionStartedAt),
+    ended_at: asNum(exec?.endedAt),
+    ended_reason: asStr(p?.endedReason),
+    pause_reason: null, // aucun équivalent dans le nouveau schéma
+  };
+}
+
+/** `cron_jobs` (OpenClaw >= 2026.9.2) : la déclaration est dans `job_json`, l'état dans `state_json`. */
+type CronDbRow = {
+  job_id: string;
+  name: string | null;
+  description: string | null;
+  enabled: number;
+  agent_id: string | null;
+  job_json: string | null;
+  state_json: string | null;
+};
+
+function toCronRow(r: CronDbRow): CronRow {
+  const job = parseJson(r.job_json) ?? {};
+  const state = parseJson(r.state_json) ?? {};
+  const sched = job?.schedule ?? {};
+  return {
+    job_id: r.job_id,
+    name: r.name ?? '',
+    display_name: asStr(job?.displayName),
+    description: r.description,
+    enabled: r.enabled, // la colonne reste la source fiable, pas `job_json.enabled`
+    agent_id: r.agent_id,
+    session_key: asStr(job?.sessionTarget),
+    schedule_kind: asStr(sched?.kind) ?? '',
+    schedule_expr: asStr(sched?.expr) ?? asStr(sched?.cron),
+    every_ms: asNum(sched?.everyMs),
+    next_run_at_ms: asNum(state?.nextRunAtMs),
+    running_at_ms: null, // aucun équivalent dans le nouveau schéma
+    last_run_at_ms: asNum(state?.lastRunAtMs),
+    last_run_status: asStr(state?.lastRunStatus) ?? asStr(state?.lastStatus),
+    last_error: asStr(state?.lastError),
+    last_duration_ms: asNum(state?.lastDurationMs),
+  };
+}
+
+/** `next_run_at_ms` vient du JSON : tri en mémoire, les jobs sans prochaine exécution en dernier. */
+function byNextRun(a: CronRow, b: CronRow): number {
+  if (a.next_run_at_ms === null || b.next_run_at_ms === null) {
+    if (a.next_run_at_ms === b.next_run_at_ms) return a.name.localeCompare(b.name);
+    return a.next_run_at_ms === null ? 1 : -1;
+  }
+  return a.next_run_at_ms - b.next_run_at_ms || a.name.localeCompare(b.name);
+}
+
+/** Marge de balayage : `ended_at` n'est plus une colonne, le filtre de fenêtre se fait en mémoire. */
+const SCAN_LIMIT = 2000;
 
 export function readDb(windowMs = 36 * 3600 * 1000): DbSnapshot {
-  if (!fs.existsSync(DB_PATH)) return { ...EMPTY, error: 'base openclaw.sqlite introuvable' };
+  if (!fs.existsSync(DB_PATH)) return failedSnapshot('openclaw.sqlite', 'base openclaw.sqlite introuvable');
   const since = Date.now() - windowMs;
-  let db: DatabaseSync | null = null;
+  let db: DatabaseSync;
   try {
     db = new DatabaseSync(DB_PATH, { readOnly: true });
-    const tasks = db
-      .prepare(
-        `select task_id, runtime, task_kind, owner_key, agent_id, requester_agent_id, parent_task_id,
-                parent_flow_id, child_session_key, requester_session_key, label, task, status, delivery_status,
-                created_at, started_at, ended_at, last_event_at, error, progress_summary, terminal_summary, terminal_outcome
-         from task_runs
-         where created_at >= ? or ended_at is null
-         order by created_at desc limit 500`,
-      )
-      .all(since) as unknown as TaskRow[];
-    const subagents = db
-      .prepare(
-        `select run_id, child_session_key, requester_session_key, task, task_name, label, model, workspace_dir,
-                spawn_mode, created_at, started_at, ended_at, ended_reason, pause_reason
-         from subagent_runs
-         where created_at >= ? or ended_at is null
-         order by created_at desc limit 300`,
-      )
-      .all(since) as unknown as SubagentRow[];
-    const flows = db
-      .prepare(
-        `select flow_id, shape, owner_key, status, goal, current_step, blocked_summary, created_at, updated_at, ended_at
-         from flow_runs where created_at >= ? or ended_at is null order by created_at desc limit 100`,
-      )
-      .all(since) as unknown as FlowRow[];
-    const crons = db
-      .prepare(
-        `select job_id, name, display_name, description, enabled, agent_id, session_key, schedule_kind,
-                schedule_expr, every_ms, next_run_at_ms, running_at_ms, last_run_at_ms, last_run_status,
-                last_error, last_duration_ms
-         from cron_jobs order by next_run_at_ms asc limit 100`,
-      )
-      .all() as unknown as CronRow[];
-    return { tasks, subagents, flows, crons, error: null };
-  } catch (e: any) {
-    return { ...EMPTY, error: String(e?.message ?? e) };
+  } catch (e) {
+    return failedSnapshot('openclaw.sqlite', errText(e));
+  }
+
+  // une requête par table, isolée : une table au schéma changé ne doit pas vider les autres
+  const errors: DbError[] = [];
+  const query = <T>(table: string, run: (db: DatabaseSync) => T[]): T[] => {
+    try {
+      return run(db);
+    } catch (e) {
+      errors.push({ table, message: errText(e) });
+      return [];
+    }
+  };
+
+  try {
+    const tasks = query<TaskRow>('task_runs', (d) =>
+      d
+        .prepare(
+          `select task_id, runtime, task_kind, owner_key, agent_id, requester_agent_id, parent_task_id,
+                  parent_flow_id, child_session_key, requester_session_key, label, task, status, delivery_status,
+                  created_at, started_at, ended_at, last_event_at, error, progress_summary, terminal_summary, terminal_outcome
+           from task_runs
+           where created_at >= ? or ended_at is null
+           order by created_at desc limit 500`,
+        )
+        .all(since) as unknown as TaskRow[],
+    );
+    const subagents = query<SubagentRow>('subagent_runs', (d) => {
+      const rows = d
+        .prepare(
+          `select run_id, child_session_key, requester_session_key, created_at, payload_json
+           from subagent_runs order by created_at desc limit ?`,
+        )
+        .all(SCAN_LIMIT) as unknown as SubagentDbRow[];
+      return rows
+        .map(toSubagentRow)
+        .filter((s) => s.created_at >= since || s.ended_at === null)
+        .slice(0, 300);
+    });
+    const flows = query<FlowRow>('flow_runs', (d) =>
+      d
+        .prepare(
+          `select flow_id, shape, owner_key, status, goal, current_step, blocked_summary, created_at, updated_at, ended_at
+           from flow_runs where created_at >= ? or ended_at is null order by created_at desc limit 100`,
+        )
+        .all(since) as unknown as FlowRow[],
+    );
+    const crons = query<CronRow>('cron_jobs', (d) => {
+      const rows = d
+        .prepare(
+          `select job_id, name, description, enabled, agent_id, job_json, state_json
+           from cron_jobs limit ?`,
+        )
+        .all(SCAN_LIMIT) as unknown as CronDbRow[];
+      return rows.map(toCronRow).sort(byNextRun).slice(0, 100);
+    });
+    return { tasks, subagents, flows, crons, errors, error: summarize(errors) };
   } finally {
     try {
-      db?.close();
+      db.close();
     } catch {
       /* noop */
     }
