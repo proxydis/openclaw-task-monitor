@@ -4,9 +4,12 @@ import { childIndex, descendants, getHostCpuPct, readMemInfo, scanProcs, type Ra
 import {
   REDACT,
   readAgents,
+  readCliSessionIndex,
   readDb,
   readSessions,
   readTranscript,
+  type AgentCfg,
+  type CliSessionRef,
   type CronRow,
   type SessionMeta,
   type SubagentRow,
@@ -77,9 +80,11 @@ function parseKey(key: string) {
 
 // ---------------------------------------------------------------- process → session
 
-type RuntimeProc = { pid: number; agentId: string | null; sessionKey: string | null; model: string | null };
+type Resolved = { agentId: string | null; sessionKey: string | null; model: string | null };
 
-const promptCache = new Map<string, { agentId: string | null; sessionKey: string | null; model: string | null }>();
+type RuntimeProc = { pid: number } & Resolved;
+
+const promptCache = new Map<string, Resolved>();
 
 function resolveFromPrompt(cmd: string) {
   const m = cmd.match(/--append-system-prompt-file\s+(\S+)/);
@@ -121,6 +126,49 @@ function cwdOf(pid: number): string | null {
   } catch {
     return null;
   }
+}
+
+/** Identifiant de session du CLI Claude porté par la ligne de commande (reprise ou session neuve). */
+export function cliSessionIdOfCmd(cmd: string): string | null {
+  const m = cmd.match(/--(?:resume|session-id)[\s=]+([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * Agent propriétaire d'un répertoire de travail. Le plus long workspace correspondant gagne :
+ * `/…/workspace` est un préfixe de `/…/workspace-neo` sans en être le parent.
+ */
+function agentByCwd(cwd: string | null, agentsCfg: AgentCfg[]): string | null {
+  if (!cwd) return null;
+  let best: AgentCfg | null = null;
+  for (const a of agentsCfg) {
+    if (!a.workspace) continue;
+    const root = a.workspace.endsWith('/') ? a.workspace.slice(0, -1) : a.workspace;
+    if (cwd !== root && !cwd.startsWith(`${root}/`)) continue;
+    if (!best || root.length > (best.workspace ?? '').length) best = a;
+  }
+  return best?.id ?? null;
+}
+
+/**
+ * Résolution nominale depuis la ligne de commande (OpenClaw >= 2026.9.2, qui ne passe plus
+ * `--append-system-prompt-file`) : l'uuid `--resume`/`--session-id` appartient à l'espace de
+ * noms du CLI Claude, disjoint des clés OpenClaw, et se traduit via l'index `session_nodes`.
+ * Session trop fraîche pour être encore écrite en base : le `cwd` donne au moins l'agent.
+ */
+export function resolveFromCmdline(
+  cmd: string,
+  cwd: string | null,
+  cliIndex: Map<string, CliSessionRef>,
+  agentsCfg: AgentCfg[],
+): Resolved {
+  const cliSessionId = cliSessionIdOfCmd(cmd);
+  const hit = cliSessionId ? (cliIndex.get(cliSessionId) ?? null) : null;
+  return {
+    agentId: hit?.agentId ?? agentByCwd(cwd, agentsCfg),
+    sessionKey: hit?.sessionKey ?? null,
+    model: cmd.match(/--model[\s=]+(\S+)/)?.[1] ?? null,
+  };
 }
 
 // ---------------------------------------------------------------- tâches
@@ -287,20 +335,22 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   }
 
   // --- process de runtime agent (claude / codex / gemini CLI)
+  const cliIndex = readCliSessionIndex(agentsCfg.map((a) => a.id));
   const runtimeProcs: RuntimeProc[] = [];
   for (const p of procs.values()) {
     const isRuntime =
       /openclaw-cli-system-prompt/.test(p.cmd) ||
       (gatewayPid !== null && p.ppid === gatewayPid && /\/(claude|codex|gemini)\b/.test(p.cmd));
     if (!isRuntime) continue;
-    const parsed = resolveFromPrompt(p.cmd);
-    let agentId = parsed?.agentId ?? null;
-    if (!agentId) {
-      const cwd = cwdOf(p.pid);
-      if (cwd) agentId = agentsCfg.find((a) => a.workspace && cwd.startsWith(a.workspace))?.id ?? null;
-    }
-    const model = parsed?.model ?? (p.cmd.match(/--model\s+(\S+)/)?.[1] ?? null);
-    runtimeProcs.push({ pid: p.pid, agentId, sessionKey: parsed?.sessionKey ?? null, model });
+    // ligne de commande d'abord ; le prompt-file ne subsiste que sur les installations antérieures
+    const byCmd = resolveFromCmdline(p.cmd, cwdOf(p.pid), cliIndex, agentsCfg);
+    const byPrompt = byCmd.sessionKey ? null : resolveFromPrompt(p.cmd);
+    runtimeProcs.push({
+      pid: p.pid,
+      agentId: byCmd.sessionKey ? byCmd.agentId : (byPrompt?.agentId ?? byCmd.agentId),
+      sessionKey: byCmd.sessionKey ?? byPrompt?.sessionKey ?? null,
+      model: byCmd.model ?? byPrompt?.model ?? null,
+    });
   }
 
   const runtimeRoots = new Set(runtimeProcs.map((r) => r.pid));

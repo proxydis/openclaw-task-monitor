@@ -21,13 +21,16 @@ export function readAgents(): AgentCfg[] {
   try {
     const raw = JSON.parse(fs.readFileSync(path.join(OC_HOME, 'openclaw.json'), 'utf8'));
     const defModel = raw?.agents?.defaults?.model?.primary ?? null;
-    const list = Array.isArray(raw?.agents?.list) ? raw.agents.list : [];
-    for (const a of list) {
-      if (!a?.id) continue;
+    const defWorkspace = raw?.agents?.defaults?.workspace ?? null;
+    // `agents.list` (tableau, ancien) et `agents.entries` (objet indexé par id, OpenClaw >= 2026.9.2)
+    const list: any[] = Array.isArray(raw?.agents?.list) ? raw.agents.list : [];
+    const entries: any[] = Object.entries<any>(raw?.agents?.entries ?? {}).map(([id, v]) => ({ ...v, id }));
+    for (const a of [...list, ...entries]) {
+      if (!a?.id || agents.some((x) => x.id === a.id)) continue;
       agents.push({
         id: a.id,
         name: a.name || a.id,
-        workspace: a.workspace ?? null,
+        workspace: a.workspace ?? defWorkspace,
         model: a.model?.primary ?? a.model ?? defModel,
       });
     }
@@ -163,6 +166,77 @@ function readSessionsJson(agentId: string): Map<string, SessionMeta> {
     /* noop */
   }
   sessCache.set(agentId, { sig, data });
+  return data;
+}
+
+// ------------------------------------------------------------------ index des sessions CLI
+
+/** Agent et clé de session OpenClaw derrière un identifiant de session du CLI Claude. */
+export type CliSessionRef = { agentId: string; sessionKey: string };
+
+const cliCache = new Map<string, { sig: string; data: Map<string, string> }>();
+let cliIndexCache: { sig: string; data: Map<string, CliSessionRef> } | null = null;
+
+/**
+ * Identifiant de session `claude-cli` porté par une entrée `session_nodes`, à trois
+ * emplacements redondants selon la version qui a écrit la ligne.
+ */
+function cliSessionIdOf(entry: any): string | null {
+  return (
+    asStr(entry?.cliSessionIds?.['claude-cli']) ??
+    asStr(entry?.cliSessionBindings?.['claude-cli']?.sessionId) ??
+    asStr(entry?.claudeCliSessionId)
+  );
+}
+
+/** `cliSessionId → session_key` pour un agent. Cache indexé comme `readSessionsDb`. */
+function readCliSessionIds(agentId: string): Map<string, string> {
+  const dbFile = agentDbPath(agentId);
+  if (!fs.existsSync(dbFile)) return new Map();
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbFile, { readOnly: true });
+    const head = db.prepare('select max(updated_at) as mx, count(*) as n from session_nodes').get() as any;
+    const sig = `${head?.mx ?? 0}:${head?.n ?? 0}`;
+    const hit = cliCache.get(agentId);
+    if (hit && hit.sig === sig) return hit.data;
+
+    const data = new Map<string, string>();
+    // du plus récent au plus ancien : un uuid réattribué pointe sur la session la plus fraîche
+    const rows = db
+      .prepare('select session_key, entry_json from session_nodes order by updated_at desc')
+      .all() as unknown as { session_key: string; entry_json: string }[];
+    for (const r of rows) {
+      const id = cliSessionIdOf(parseJson(r.entry_json));
+      if (id && !data.has(id)) data.set(id, r.session_key);
+    }
+    cliCache.set(agentId, { sig, data });
+    return data;
+  } catch {
+    return new Map();
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* noop */
+    }
+  }
+}
+
+/**
+ * Index global `cliSessionId → { agentId, sessionKey }`, balayé sur toutes les bases par agent.
+ * Les deux espaces de noms sont disjoints : l'uuid du CLI Claude n'apparaît nulle part dans
+ * `session_windows.session_id`, seul `session_nodes.entry_json` fait la jonction.
+ */
+export function readCliSessionIndex(agentIds: string[]): Map<string, CliSessionRef> {
+  const parts = agentIds.map((id) => [id, readCliSessionIds(id)] as const);
+  const sig = parts.map(([id]) => `${id}=${cliCache.get(id)?.sig ?? '-'}`).join('|');
+  if (cliIndexCache && cliIndexCache.sig === sig) return cliIndexCache.data;
+  const data = new Map<string, CliSessionRef>();
+  for (const [agentId, map] of parts) {
+    for (const [cliId, sessionKey] of map) if (!data.has(cliId)) data.set(cliId, { agentId, sessionKey });
+  }
+  cliIndexCache = { sig, data };
   return data;
 }
 

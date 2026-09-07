@@ -234,6 +234,7 @@ function SessionRows({
   setSel,
   match,
   showDone,
+  runningOnly,
 }: {
   sessions: SessionNode[];
   agent: AgentNode;
@@ -245,18 +246,24 @@ function SessionRows({
   setSel: (s: Sel) => void;
   match: (s: string) => boolean;
   showDone: boolean;
+  runningOnly: boolean;
 }) {
   const { lang, t: tr, m } = useI18n();
   return (
     <div className="kids">
       {sessions.map((s) => {
-        const tasks = showDone ? s.tasks : s.tasks.filter((t) => t.state !== 'done');
-        const kids = s.children.length + tasks.length;
+        const tasks = runningOnly
+          ? s.tasks.filter((t) => t.state === 'running')
+          : showDone
+            ? s.tasks
+            : s.tasks.filter((t) => t.state !== 'done');
+        const children = runningOnly ? s.children.filter((c) => c.state === 'running') : s.children;
+        const kids = children.length + tasks.length;
         const id = `s:${s.key}`;
         const isOpen = open.has(id);
         const deep = `${m(s.title)} ${m(s.subtitle)} ${s.key} ${s.tasks.map((t) => m(t.title)).join(' ')}`;
         const selfMatch = match(deep);
-        const kidMatch = s.children.some((c) => match(`${m(c.title)} ${m(c.subtitle)}`));
+        const kidMatch = children.some((c) => match(`${m(c.title)} ${m(c.subtitle)}`));
         if (!selfMatch && !kidMatch) return null;
         return (
           <div className="node" key={id}>
@@ -282,9 +289,9 @@ function SessionRows({
             />
             {isOpen ? (
               <>
-                {s.children.length ? (
+                {children.length ? (
                   <SessionRows
-                    sessions={s.children}
+                    sessions={children}
                     agent={agent}
                     depth={depth + 1}
                     cores={cores}
@@ -294,6 +301,7 @@ function SessionRows({
                     setSel={setSel}
                     match={match}
                     showDone={showDone}
+                    runningOnly={runningOnly}
                   />
                 ) : null}
                 <TaskRows
@@ -527,6 +535,7 @@ function DashboardInner() {
   const [selRef, setSelRef] = useState<SelRef | null>(null);
   const [tab, setTab] = useState<'tree' | 'procs'>('tree');
   const [q, setQ] = useState('');
+  const [runningOnly, setRunningOnly] = useState(false);
   const [showIdle, setShowIdle] = useState(true);
   const [showDone, setShowDone] = useState(true);
   const bootstrapped = useRef(false);
@@ -593,7 +602,10 @@ function DashboardInner() {
   const h = snap.host;
   const memPct = h.memTotalMb ? (h.memUsedMb / h.memTotalMb) * 100 : 0;
   const swapPct = h.swapTotalMb ? (h.swapUsedMb / h.swapTotalMb) * 100 : 0;
-  const agents = snap.agents.filter((a) => showIdle || a.state === 'running');
+  // « en cours seulement » subsume les deux autres bascules : elles sont neutralisées tant qu'elle est active
+  const idleVisible = showIdle && !runningOnly;
+  const doneVisible = showDone && !runningOnly;
+  const agents = snap.agents.filter((a) => idleVisible || a.state === 'running');
 
   return (
     <div className="shell">
@@ -707,11 +719,25 @@ function DashboardInner() {
             </div>
             <input className="search" placeholder={tr('ui.filter')} value={q} onChange={(e) => setQ(e.target.value)} />
             <label className="toggle">
-              <input type="checkbox" checked={showIdle} onChange={(e) => setShowIdle(e.target.checked)} />
+              <input type="checkbox" checked={runningOnly} onChange={(e) => setRunningOnly(e.target.checked)} />
+              {tr('toggle.running')}
+            </label>
+            <label className="toggle">
+              <input
+                type="checkbox"
+                checked={idleVisible}
+                disabled={runningOnly}
+                onChange={(e) => setShowIdle(e.target.checked)}
+              />
               {tr('toggle.idle')}
             </label>
             <label className="toggle">
-              <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
+              <input
+                type="checkbox"
+                checked={doneVisible}
+                disabled={runningOnly}
+                onChange={(e) => setShowDone(e.target.checked)}
+              />
               {tr('toggle.done')}
             </label>
           </header>
@@ -724,7 +750,7 @@ function DashboardInner() {
               {agents.map((a) => {
                 const id = `a:${a.id}`;
                 const isOpen = open.has(id);
-                const sessions = a.sessions.filter((s) => showIdle || s.state === 'running');
+                const sessions = a.sessions.filter((s) => idleVisible || s.state === 'running');
                 return (
                   <div className="node" key={id}>
                     <Row
@@ -764,7 +790,8 @@ function DashboardInner() {
                         sel={sel}
                         setSel={setSel}
                         match={match}
-                        showDone={showDone}
+                        showDone={doneVisible}
+                        runningOnly={runningOnly}
                       />
                     ) : null}
                   </div>
