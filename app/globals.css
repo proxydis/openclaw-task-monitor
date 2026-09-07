@@ -108,6 +108,8 @@ button { font: inherit; color: inherit; }
 
 .toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--txt-dim); cursor: pointer; user-select: none; }
 .toggle input { accent-color: var(--accent); }
+/* neutralisée par « en cours seulement », qui la subsume */
+.toggle:has(input:disabled) { opacity: .45; cursor: default; }
 
 /* ---------------- arbre ---------------- */
 .node { position: relative; }

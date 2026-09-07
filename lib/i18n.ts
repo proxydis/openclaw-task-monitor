@@ -43,7 +43,7 @@ const EN: Record<string, string> = {
   'proc.runtime': 'runtime {id}',
   'proc.mcp': 'MCP server',
   'proc.browser': 'chrome (browser tool)',
-  'warn.sqlite': 'sqlite: {err}',
+  'warn.sqlite': 'sqlite {table}: {err}',
 
   // mode démo
   'redact.session': 'Session {n}',
@@ -84,6 +84,7 @@ const EN: Record<string, string> = {
   'tab.tree': 'Tree',
   'tab.procs': 'Processes ({n})',
   'ui.filter': 'filter…',
+  'toggle.running': 'running only',
   'toggle.idle': 'idle',
   'toggle.done': 'finished',
   'ui.noAgents': 'No agent to display.',
@@ -186,7 +187,7 @@ const FR: Record<string, string> = {
   'proc.runtime': 'runtime {id}',
   'proc.mcp': 'serveur MCP',
   'proc.browser': 'chrome (outil navigateur)',
-  'warn.sqlite': 'sqlite : {err}',
+  'warn.sqlite': 'sqlite {table} : {err}',
 
   'redact.session': 'Session {n}',
   'redact.subagent': 'Sous-agent {n}',
@@ -223,6 +224,7 @@ const FR: Record<string, string> = {
   'tab.tree': 'Arbre',
   'tab.procs': 'Process ({n})',
   'ui.filter': 'filtrer…',
+  'toggle.running': 'en cours seulement',
   'toggle.idle': 'inactifs',
   'toggle.done': 'terminées',
   'ui.noAgents': 'Aucun agent à afficher.',
