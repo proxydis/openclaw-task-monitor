@@ -10,6 +10,13 @@ export function ago(lang: Lang, ts: number | null | undefined, now = Date.now())
   return t(lang, 'fmt.day', { n: Math.floor(d / 86_400_000) });
 }
 
+/** Comme `ago`, mais tourné : « 1 min ago » / « il y a 1 min ». */
+export function agoRel(lang: Lang, ts: number | null | undefined, now = Date.now()): string {
+  if (!ts) return '—';
+  if (now - ts < 10_000) return t(lang, 'fmt.justNow');
+  return t(lang, 'fmt.ago', { d: ago(lang, ts, now) });
+}
+
 export function dur(lang: Lang, ms: number | null | undefined): string {
   if (ms == null) return '—';
   const s = Math.floor(ms / 1000);
@@ -30,6 +37,31 @@ export function clock(lang: Lang, ts: number | null | undefined): string {
     minute: '2-digit',
     second: '2-digit',
   });
+}
+
+/**
+ * Échéance de réinitialisation d'une limite de forfait, recalculée à chaque rendu
+ * (jamais figée au moment de la collecte) :
+ *  - moins de 24 h  → « Réinitialisation dans 1 h 50 min »
+ *  - au-delà        → « Réinitialisation jeu. 01:59 » (jour abrégé + heure locale)
+ */
+export function resetIn(lang: Lang, resetsAt: number | null, now = Date.now()): string | null {
+  if (!resetsAt) return null;
+  const d = resetsAt - now;
+  if (d <= 0) return t(lang, 'plan.resetSoon');
+  if (d < 86_400_000) {
+    const h = Math.floor(d / 3_600_000);
+    const min = Math.floor((d % 3_600_000) / 60_000);
+    const span = h > 0 ? t(lang, 'fmt.hourMin', { h, m: min }) : t(lang, 'fmt.min', { n: Math.max(1, min) });
+    return t(lang, 'plan.resetIn', { d: span });
+  }
+  // tronqué à la minute : sans ce plancher, Chrome arrondit 01:59:59 en « 02:00 »
+  const when = new Date(Math.floor(resetsAt / 60_000) * 60_000).toLocaleString(locale(lang), {
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  return t(lang, 'plan.resetAt', { d: when });
 }
 
 export function mb(lang: Lang, v: number): string {

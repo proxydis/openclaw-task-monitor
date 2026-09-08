@@ -108,6 +108,9 @@ Every setting goes through environment variables.
 | `HOSTNAME` | `127.0.0.1` | listening interface |
 | `OPENCLAW_HOME` | `~/.openclaw` | root of the supervised install |
 | `MONITOR_REDACT` | — | `1` masks all business content (see below) |
+| `MONITOR_PLAN_USAGE` | — | `0` disables the Anthropic plan-usage card (no network call) |
+| `MONITOR_PLAN_TTL_MS` | `600000` | polling interval of the usage endpoint; the API grants about one call every 5 min, going lower gets the account rate-limited |
+| `CLAUDE_CONFIG_DIR` | `~/.claude` | where the Claude Code OAuth token is read from (read-only) |
 
 With systemd, edit the generated unit then reload:
 
@@ -196,6 +199,7 @@ systemctl --user daemon-reload
 |---|---|
 | `Cannot find module 'node:sqlite'` | Node.js older than 22.5 — upgrade Node |
 | `EADDRINUSE` on startup | port already taken — `./install.sh <other-port>` |
+| Plan card shows “Anthropic is rate-limiting…” | normal: the usage endpoint grants ~1 call every 5 min and the Claude CLI shares that quota. The gauges keep their last reading and polling resumes on its own; only raise `MONITOR_PLAN_TTL_MS` if it persists |
 | Empty tree, no agent | wrong install root — set `OPENCLAW_HOME` to the folder that holds `openclaw.json` |
 | `sqlite: …` warning in the banner | `state/openclaw.sqlite` unreadable (permissions, or gateway never started) |
 | Page stuck on “connecting to stream…” | server down or unreachable — check `journalctl --user -u openclaw-monitor` |

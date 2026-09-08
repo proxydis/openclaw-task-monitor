@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import os from 'node:os';
+import { getPlanUsage } from './anthropic-usage';
 import { childIndex, descendants, getHostCpuPct, readMemInfo, scanProcs, unitOfPid, type RawProc } from './procs';
 import { collectSystemdJobs, infraMainPids, jobCommand, type SystemdJob } from './systemd-jobs';
 import { agentForPath, agentForText, withWorkspaces } from './workspaces';
@@ -913,6 +914,8 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       port: gatewayPort,
       version: null,
     },
+    // accesseur synchrone : rend le dernier relevé connu, rafraîchit en arrière-plan
+    plan: getPlanUsage(),
     agents,
     system: {
       browser: res(browserPids, procs),
