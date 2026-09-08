@@ -1,15 +1,18 @@
 // Logo du monitor : le crabe OpenClaw devant un écran.
 // Inline plutôt qu'un fichier de `public/` : le bundle standalone ne recopie
 // pas systématiquement les assets statiques (voir le script `postbuild`).
-// Les ids de gradient sont préfixés pour ne pas entrer en collision avec
-// `app/icon.svg`, qui reprend le même dessin pour la favicon.
-export default function CrabLogo({ className }: { className?: string }) {
+// Même dessin que `app/icon.svg` (la favicon) : toute retouche ici doit y être
+// reportée. Les ids de gradient sont préfixés `ocm-` parce qu'ils vivent dans le
+// DOM de la page, partagé avec tout autre SVG inline présent ou futur.
+// Décoratif : le titre « OpenClaw Monitor » suit immédiatement dans le <h1>,
+// d'où `aria-hidden` plutôt qu'un `aria-label` qui le ferait annoncer deux fois.
+export default function CrabLogo({ className }: Readonly<{ className?: string }>) {
   return (
     <svg
       className={className}
       viewBox="0 0 64 64"
-      role="img"
-      aria-label="OpenClaw Monitor"
+      aria-hidden="true"
+      focusable="false"
       xmlns="http://www.w3.org/2000/svg"
     >
       <defs>
