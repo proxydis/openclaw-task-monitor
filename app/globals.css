@@ -52,9 +52,9 @@ button { font: inherit; color: inherit; }
 .brand h1 { font-size: 16px; margin: 0; letter-spacing: .3px; font-weight: 650; }
 .brand .sub { font-size: 11px; color: var(--txt-faint); font-family: var(--mono); }
 .logo {
-  width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+  width: 40px; height: 40px; border-radius: 10px; display: block; padding: 3px;
   background: linear-gradient(135deg, rgba(56,189,248,.25), rgba(167,139,250,.25));
-  border: 1px solid var(--line); font-size: 15px;
+  border: 1px solid var(--line); flex: none;
 }
 .live { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--txt-dim); font-family: var(--mono); }
 .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 0 rgba(52,211,153,.6); animation: pulse 2s infinite; }

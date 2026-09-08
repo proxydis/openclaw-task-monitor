@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="OpenClaw Monitor">
+  <!-- Favicon. Même dessin que components/CrabLogo.tsx : toute retouche ici doit y être reportée. -->
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fb923c"/>
+      <stop offset="1" stop-color="#e0453c"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#38bdf8" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#a78bfa" stop-opacity=".10"/>
+    </linearGradient>
+  </defs>
+
+  <!-- écran -->
+  <rect x="6" y="4.5" width="52" height="34" rx="5.5" fill="#131a25" stroke="#38bdf8" stroke-width="3"/>
+  <rect x="10" y="8.5" width="44" height="26" rx="3" fill="url(#glass)"/>
+  <polyline points="14,28 21,20.5 27,25 34,13.5 41,19 50,10.5" fill="none" stroke="#34d399"
+            stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="50" cy="10.5" r="2.6" fill="#34d399"/>
+
+  <!-- pinces et pattes -->
+  <g stroke="#ea580c" stroke-linecap="round" fill="none">
+    <path d="M23 49.5 L14.5 45.5" stroke-width="4"/>
+    <path d="M41 49.5 L49.5 45.5" stroke-width="4"/>
+    <path d="M24.5 55 L18 58.5" stroke-width="3"/>
+    <path d="M23 51.5 L15.5 53" stroke-width="3"/>
+    <path d="M39.5 55 L46 58.5" stroke-width="3"/>
+    <path d="M41 51.5 L48.5 53" stroke-width="3"/>
+  </g>
+  <g stroke="#f97316" stroke-width="4.5" stroke-linecap="round" fill="none">
+    <path d="M10 40.5 A 6.5 6.5 0 1 1 10 49.5"/>
+    <path d="M54 40.5 A 6.5 6.5 0 1 0 54 49.5"/>
+  </g>
+
+  <!-- yeux sur pédoncules, tournés vers l'écran -->
+  <g stroke="#ea580c" stroke-width="3" stroke-linecap="round">
+    <path d="M27 43 L27 37.5"/>
+    <path d="M37 43 L37 37.5"/>
+  </g>
+  <circle cx="27" cy="35.8" r="3.6" fill="#f8fafc"/>
+  <circle cx="37" cy="35.8" r="3.6" fill="#f8fafc"/>
+  <circle cx="27" cy="34.9" r="1.7" fill="#0a0d13"/>
+  <circle cx="37" cy="34.9" r="1.7" fill="#0a0d13"/>
+
+  <!-- carapace -->
+  <ellipse cx="32" cy="50" rx="12" ry="9" fill="url(#shell)"/>
+  <path d="M23.5 46.5 q8.5 -4.5 17 0" fill="none" stroke="#ffffff" stroke-opacity=".28"
+        stroke-width="2" stroke-linecap="round"/>
+  <path d="M28 53 q4 3 8 0" fill="none" stroke="#7f1d1d" stroke-opacity=".55"
+        stroke-width="1.8" stroke-linecap="round"/>
+</svg>

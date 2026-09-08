@@ -5,6 +5,7 @@ import type { AgentNode, PlanLimit, PlanUsage, ProcInfo, Res, SessionNode, Snaps
 import { agentStateLabel, stateLabel } from '@/lib/i18n';
 import { LangProvider, LangSwitch, useI18n } from './LangProvider';
 import { ago, agoRel, clock, dur, lvl, mb, mbShort, resetIn } from './format';
+import CrabLogo from './CrabLogo';
 
 // ------------------------------------------------------------------ flux
 
@@ -668,6 +669,9 @@ function DashboardInner() {
   const { lang, t: tr, m } = useI18n();
   const { snap, live, err } = useSnapshot();
   const [open, setOpen] = useState<Set<string>>(new Set());
+  // mode « tout déplier » : rémanent, pour que les nœuds apparus ensuite s'ouvrent aussi
+  const [expandAll, setExpandAll] = useState(false);
+  const openRef = useRef(open);
   const [selRef, setSelRef] = useState<SelRef | null>(null);
   const [tab, setTab] = useState<'tree' | 'procs'>('tree');
   const [q, setQ] = useState('');
@@ -702,6 +706,10 @@ function DashboardInner() {
   }, []);
   const sel = snap ? resolveSel(snap, selRef) : null;
 
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
   const toggle = useCallback((id: string) => {
     setOpen((prev) => {
       const n = new Set(prev);
@@ -709,6 +717,9 @@ function DashboardInner() {
       else n.add(id);
       return n;
     });
+    // un repli manuel quitte le mode « tout déplier », sinon le nœud que l'on
+    // vient de fermer serait rouvert au snapshot suivant
+    if (openRef.current.has(id)) setExpandAll(false);
   }, []);
 
   const match = useMemo(() => {
@@ -716,20 +727,36 @@ function DashboardInner() {
     return (s: string) => (needle ? s.toLowerCase().includes(needle) : true);
   }, [q]);
 
-  // Bouton unique : il replie si tout est déjà déplié, il déplie sinon. Un nœud
-  // apparu depuis le dernier dépliage suffit à le remettre en mode « tout déplier ».
+  // Bouton unique : il replie si tout est déjà déplié, il déplie sinon. Le mode
+  // « tout déplier » reste armé tant qu'on ne replie pas (bouton ou nœud) : les
+  // sessions et tâches apparues ensuite s'ouvrent donc dès leur arrivée.
   const allIds = useMemo(() => (snap ? expandableIds(snap.agents) : []), [snap]);
   const allOpen = allIds.length > 0 && allIds.every((id) => open.has(id));
+  const expanded = expandAll || allOpen;
   const toggleAll = useCallback(() => {
-    setOpen(allOpen ? new Set<string>() : new Set(allIds));
-  }, [allOpen, allIds]);
+    const next = !expanded;
+    setExpandAll(next);
+    setOpen(next ? new Set(allIds) : new Set<string>());
+  }, [expanded, allIds]);
+
+  // rattrape les nœuds apparus après l'activation du bouton « tout déplier »
+  useEffect(() => {
+    if (!expandAll) return;
+    setOpen((prev) => {
+      const missing = allIds.filter((id) => !prev.has(id));
+      if (!missing.length) return prev;
+      const n = new Set(prev);
+      for (const id of missing) n.add(id);
+      return n;
+    });
+  }, [expandAll, allIds]);
 
   if (!snap) {
     return (
       <div className="shell">
         <div className="topbar">
           <div className="brand">
-            <span className="logo">◈</span>
+            <CrabLogo className="logo" />
             <div>
               <h1>OpenClaw Monitor</h1>
               <div className="sub">{tr('ui.connecting')}</div>
@@ -756,7 +783,7 @@ function DashboardInner() {
     <div className="shell">
       <div className="topbar">
         <div className="brand">
-          <span className="logo">◈</span>
+          <CrabLogo className="logo" />
           <div>
             <h1>OpenClaw Monitor</h1>
             <div className="sub">
@@ -866,13 +893,13 @@ function DashboardInner() {
               <button
                 type="button"
                 className="tree-all"
-                title={tr(allOpen ? 'tree.collapseAll' : 'tree.expandAll')}
-                aria-label={tr(allOpen ? 'tree.collapseAll' : 'tree.expandAll')}
-                aria-expanded={allOpen}
+                title={tr(expanded ? 'tree.collapseAll' : 'tree.expandAll')}
+                aria-label={tr(expanded ? 'tree.collapseAll' : 'tree.expandAll')}
+                aria-expanded={expanded}
                 disabled={!allIds.length}
                 onClick={toggleAll}
               >
-                {allOpen ? '⊟' : '⊞'}
+                {expanded ? '⊟' : '⊞'}
               </button>
             ) : null}
             <input className="search" placeholder={tr('ui.filter')} value={q} onChange={(e) => setQ(e.target.value)} />
