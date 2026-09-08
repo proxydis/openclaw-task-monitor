@@ -5,6 +5,7 @@ import type { AgentNode, PlanLimit, PlanUsage, ProcInfo, Res, SessionNode, Snaps
 import { agentStateLabel, stateLabel } from '@/lib/i18n';
 import { LangProvider, LangSwitch, useI18n } from './LangProvider';
 import { ago, agoRel, clock, dur, lvl, mb, mbShort, resetIn } from './format';
+import CrabLogo from './CrabLogo';
 
 // ------------------------------------------------------------------ flux
 
@@ -729,7 +730,7 @@ function DashboardInner() {
       <div className="shell">
         <div className="topbar">
           <div className="brand">
-            <span className="logo">◈</span>
+            <CrabLogo className="logo" />
             <div>
               <h1>OpenClaw Monitor</h1>
               <div className="sub">{tr('ui.connecting')}</div>
@@ -756,7 +757,7 @@ function DashboardInner() {
     <div className="shell">
       <div className="topbar">
         <div className="brand">
-          <span className="logo">◈</span>
+          <CrabLogo className="logo" />
           <div>
             <h1>OpenClaw Monitor</h1>
             <div className="sub">
