@@ -92,6 +92,14 @@ function retryAfterMs(h: string | null): number {
  * GET authentifié sur l'API OAuth. Ne lève jamais : toute panne est convertie en `Msg`.
  * Le corps de la réponse n'est jamais remonté dans un message d'erreur (il peut contenir
  * des identifiants) — seuls le code HTTP ou le libellé de l'exception le sont.
+ *
+ * **Arbitrage assumé sur le `User-Agent`.** On se présente comme le CLI Claude sur un
+ * endpoint OAuth non documenté. Ce qui le justifie : le jeton est celui de l'utilisateur,
+ * les données lues sont les siennes, la lecture est strictement passive, et l'endpoint
+ * n'est pas exposé autrement. Ce qu'il faut savoir en contrepartie : cette surface peut
+ * changer sans préavis, et la panne sera silencieuse — la carte se dégradera sans que rien
+ * d'autre ne casse. Si un jour l'API refuse ce `User-Agent` ou si Anthropic publie un
+ * endpoint officiel, c'est ici qu'il faut basculer, pas ailleurs.
  */
 async function oauthGet(endpoint: string, token: string): Promise<Fetched> {
   try {
@@ -150,7 +158,7 @@ function toLimit(raw: any, i: number): PlanLimit | null {
   if (!Number.isFinite(percent)) return null;
   const model = typeof raw?.scope?.model?.display_name === 'string' ? raw.scope.model.display_name : null;
   const surface = typeof raw?.scope?.surface === 'string' ? raw.scope.surface : null;
-  const label: Msg = model ?? (KNOWN_KINDS.has(kind) ? { k: `plan.limit.${kind}` } : kind.replace(/_/g, ' '));
+  const label: Msg = model ?? (KNOWN_KINDS.has(kind) ? { k: `plan.limit.${kind}` } : kind.replaceAll('_', ' '));
   return {
     id: `${kind}:${model ?? surface ?? i}`,
     kind,
@@ -228,6 +236,10 @@ let profileInflight: Promise<void> | null = null;
 let throttledUntil = 0;
 let throttleStep = 0;
 
+/** Plancher entre deux rafraîchissements forcés (bouton ↻ / `GET /api/plan`). */
+const FORCE_MIN_INTERVAL = envMs('MONITOR_PLAN_FORCE_MIN_MS', 30_000);
+let lastForcedAt = 0;
+
 async function fetchUsage(): Promise<void> {
   const token = readToken();
   if (!token) {
@@ -266,20 +278,16 @@ async function fetchProfile(): Promise<void> {
 
 /** Rafraîchit le relevé d'usage — jamais deux appels en vol simultanément. */
 function refreshUsage(): Promise<void> {
-  if (!usageInflight) {
-    usageInflight = fetchUsage().finally(() => {
-      usageInflight = null;
-    });
-  }
+  usageInflight ??= fetchUsage().finally(() => {
+    usageInflight = null;
+  });
   return usageInflight;
 }
 
 function refreshProfile(): Promise<void> {
-  if (!profileInflight) {
-    profileInflight = fetchProfile().finally(() => {
-      profileInflight = null;
-    });
-  }
+  profileInflight ??= fetchProfile().finally(() => {
+    profileInflight = null;
+  });
   return profileInflight;
 }
 
@@ -307,7 +315,13 @@ export function getPlanUsage(): PlanUsage | null {
  */
 export async function refreshPlanUsage(): Promise<PlanUsage | null> {
   if (!PLAN_USAGE_ENABLED) return null;
-  if (Date.now() < throttledUntil) return snapshot();
+  const now = Date.now();
+  if (now < throttledUntil) return snapshot();
+  // `/api/plan` n'est pas authentifiée et le service peut écouter au-delà de la loopback :
+  // sans plancher, une boucle sur la route viderait le quota d'usage du compte, alors même
+  // que le backoff sur 429 n'existe qu'*après* le premier 429 que ce module cherche à éviter.
+  if (now - lastForcedAt < FORCE_MIN_INTERVAL) return snapshot();
+  lastForcedAt = now;
   usageAt = 0;
   profileAt = 0;
   await Promise.all([refreshUsage().catch(() => {}), refreshProfile().catch(() => {})]);

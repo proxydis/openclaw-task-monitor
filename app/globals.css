@@ -191,8 +191,10 @@ button { font: inherit; color: inherit; }
 }
 .plan .section-t { margin: 16px 0 9px; }
 
+/* fond opaque plutôt qu'un ambre à 8 % : le couple couleur/fond doit être vérifiable
+   (contraste 11:1 ici), un fond translucide se lit comme du texte clair sur clair */
 .plan-err {
-  background: rgba(251,191,36,.08); border: 1px solid rgba(251,191,36,.3); color: #fcd34d;
+  background: #241d10; border: 1px solid rgba(251,191,36,.3); color: #fcd34d;
   border-radius: 8px; padding: 8px 10px; font-size: 12px; line-height: 1.45; margin-bottom: 10px;
 }
 
