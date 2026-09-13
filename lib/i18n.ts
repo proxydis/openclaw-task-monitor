@@ -30,6 +30,7 @@ const EN: Record<string, string> = {
   // unités produites par la collecte
   'task.liveTurn': 'Current turn',
   'task.liveTurnDetail': 'Current turn — prompt unavailable.',
+  'prompt.clipped': '{text}\n\n[… {n} more characters]',
   'task.activeProcs': '{n} active process(es)',
   'runtime.agentTurn': 'agent turn',
   'cron.detailEvery': '{desc} · every {min} min',
@@ -207,6 +208,7 @@ const FR: Record<string, string> = {
 
   'task.liveTurn': 'Tour en cours',
   'task.liveTurnDetail': 'Tour en cours — énoncé indisponible.',
+  'prompt.clipped': '{text}\n\n[… {n} caractères de plus]',
   'task.activeProcs': '{n} process actif(s)',
   'runtime.agentTurn': 'tour agent',
   'cron.detailEvery': '{desc} · toutes les {min} min',

@@ -242,12 +242,30 @@ export function readCliSessionIndex(agentIds: string[]): Map<string, CliSessionR
 
 export type Transcript = {
   prompt: string | null;
+  /** longueur du texte nettoyé *avant* coupe : permet d'annoncer ce qui manque */
+  promptChars: number;
   promptAt: number | null;
   lastMessageAt: number | null;
   userTurns: number;
 };
 
-const EMPTY_TRANSCRIPT: Transcript = { prompt: null, promptAt: null, lastMessageAt: null, userTurns: 0 };
+const EMPTY_TRANSCRIPT: Transcript = {
+  prompt: null,
+  promptChars: 0,
+  promptAt: null,
+  lastMessageAt: null,
+  userTurns: 0,
+};
+
+/**
+ * Plafond de l'énoncé retenu par session.
+ *
+ * Il était à 600. Une simple capture d'écran jointe suffisait à le dépasser avant même
+ * le premier mot de l'humain : l'enveloppe de pièce jointe et la description d'image
+ * générée par le pont pèsent à elles seules ~400 caractères. La demande se retrouvait
+ * coupée en plein mot et rien ne le signalait.
+ */
+const PROMPT_MAX = 4000;
 const trCache = new Map<string, { sig: string; data: Transcript }>();
 /** Fenêtre de lecture, équivalente aux derniers 512 Ko lus dans l'ancien `.jsonl`. */
 const MAX_EVENTS = 200;
@@ -262,6 +280,31 @@ function textOf(content: unknown): string {
   return '';
 }
 
+/**
+ * Énoncé humain débarrassé de son enveloppe.
+ *
+ * Ce qui part : les blocs `<system-reminder>` injectés par le harnais, le contexte de
+ * routage `⟦openclaw:ctx⟧`, le marqueur de pièce jointe et la description d'image
+ * produite automatiquement par le pont. Ce qui reste : le texte de l'humain, retours à
+ * la ligne compris — `.quote` les rend (`white-space: pre-wrap`) et une consigne en
+ * plusieurs points devient illisible une fois mise à plat.
+ *
+ * Les blocs ``` ne sont plus supprimés : du code collé dans une demande fait partie de
+ * la demande, et les voir disparaître donnait un énoncé incompréhensible.
+ */
+function cleanPrompt(raw: string): string {
+  return raw
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ' ')
+    .replace(/⟦openclaw:ctx⟧\s*```[\s\S]*?```/g, ' ')
+    .replace(/\[media attached:[^\]]*\]/g, ' ')
+    .replace(/\[(?:Slack|Telegram|Discord|WhatsApp|iMessage) file:[^\]]*\]/gi, ' ')
+    .replace(/Description:\s*#\s*Image Description[\s\S]*$/i, ' ')
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
 /** Accumule un évènement de transcript, du plus récent au plus ancien. */
 function applyEvent(data: Transcript, o: any): void {
   if (o?.type !== 'message' || !o?.message) return;
@@ -270,14 +313,11 @@ function applyEvent(data: Transcript, o: any): void {
   if (o.message.role !== 'user') return;
   data.userTurns++;
   if (data.prompt) return;
-  const txt = textOf(o.message.content)
-    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/g, ' ')
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const txt = cleanPrompt(textOf(o.message.content));
   if (!txt || txt.length < 3) return;
   // placeholder interne : en mode démo, `redactSnapshot` remet ce champ à null de toute façon
-  data.prompt = REDACT ? `redacted prompt (${txt.length} chars)` : txt.slice(0, 600);
+  data.prompt = REDACT ? `redacted prompt (${txt.length} chars)` : txt.slice(0, PROMPT_MAX);
+  data.promptChars = REDACT ? 0 : txt.length;
   data.promptAt = ts;
 }
 

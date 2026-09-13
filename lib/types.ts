@@ -71,7 +71,7 @@ export type SessionNode = {
   lastActivityAt: number | null;
   model: string | null;
   /** dernier prompt utilisateur, lu dans le transcript (aucun appel modèle) */
-  prompt: string | null;
+  prompt: Msg | null;
   turns: number;
   res: Res;
   pids: number[];
