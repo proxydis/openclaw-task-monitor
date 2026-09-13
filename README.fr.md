@@ -188,11 +188,44 @@ git pull
 ./install.sh          # reconstruit et redémarre le service
 ```
 
+### Sonde de santé et redémarrage automatique
+
+`install.sh` installe aussi un timer qui interroge `http://127.0.0.1:<port>/` une
+fois par minute et redémarre le service dès qu'il ne répond plus :
+
+```bash
+systemctl --user list-timers openclaw-monitor-healthcheck.timer
+journalctl --user -u openclaw-monitor-healthcheck -n 30
+./healthcheck.sh                                  # une sonde à la main
+```
+
+Il existe parce que `systemctl status` ne suffit pas. Un process `next-server`
+peut garder son unité `active/running` avec `NRestarts=0` tout en ayant perdu son
+socket d'écoute : plus rien ne s'y connecte, et systemd annonce un service en
+pleine forme. Seule une vraie requête sur le port le voit.
+
+Trois garde-fous l'empêchent de faire plus de dégâts que la panne qu'il répare :
+
+- trois sondes à cinq secondes d'intervalle avant d'agir, pour qu'une requête
+  perdue ne coûte un redémarrage à personne ;
+- une unité `inactive` est laissée tranquille — `Restart=always` couvre déjà les
+  plantages, donc une unité arrêtée l'est parce qu'un humain l'a voulu ;
+- cinq minutes de délai entre deux redémarrages automatiques. Au-delà le script
+  journalise la raison et refuse d'agir : un service qui remeurt en moins de cinq
+  minutes a un autre problème, et une boucle de redémarrage ne ferait qu'effacer
+  les indices.
+
+Réglages via les lignes `Environment=MONITOR_HC_*` de
+`openclaw-monitor-healthcheck.service`, désactivation avec
+`systemctl --user disable --now openclaw-monitor-healthcheck.timer`.
+
 Désinstallation :
 
 ```bash
+systemctl --user disable --now openclaw-monitor-healthcheck.timer
 systemctl --user disable --now openclaw-monitor.service
 rm ~/.config/systemd/user/openclaw-monitor.service
+rm ~/.config/systemd/user/openclaw-monitor-healthcheck.{service,timer}
 systemctl --user daemon-reload
 ```
 
@@ -206,6 +239,7 @@ systemctl --user daemon-reload
 | Arbre vide, aucun agent | mauvaise racine d'installation — pointer `OPENCLAW_HOME` sur le dossier qui contient `openclaw.json` |
 | Bandeau d'avertissement `sqlite : …` | `state/openclaw.sqlite` illisible (droits, ou gateway jamais démarrée) |
 | Page bloquée sur « connexion au flux… » | serveur arrêté ou injoignable — voir `journalctl --user -u openclaw-monitor` |
+| Page qui alterne « live » et « reconnecting » toutes les secondes | le process tourne mais n'écoute plus : le socket SSE ouvert plus tôt continue de délivrer son tick pendant que toute nouvelle requête est refusée. Confirmer avec `ss -tlnp \| grep 3200` — le timer de santé répare ça en ~90 s, `journalctl --user -u openclaw-monitor-healthcheck` dit ce qu'il a vu |
 | CPU à 0 % partout | le monitor ne voit que les process de l'utilisateur qui l'exécute ; le lancer sous l'utilisateur propriétaire de la gateway |
 
 ## Licence

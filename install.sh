@@ -7,6 +7,8 @@ APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 PORT="${1:-3200}"
 NODE_BIN="$(command -v node)"
 UNIT="$HOME/.config/systemd/user/openclaw-monitor.service"
+HC_UNIT="$HOME/.config/systemd/user/openclaw-monitor-healthcheck.service"
+HC_TIMER="$HOME/.config/systemd/user/openclaw-monitor-healthcheck.timer"
 
 cd "$APP_DIR"
 
@@ -28,10 +30,22 @@ sed -e "s#__APP_DIR__#$APP_DIR#g" \
     -e "s#Environment=PORT=3200#Environment=PORT=$PORT#" \
     openclaw-monitor.service.example > "$UNIT"
 
+echo "→ systemd healthcheck: $HC_UNIT"
+chmod +x "$APP_DIR/healthcheck.sh"
+sed -e "s#__APP_DIR__#$APP_DIR#g" \
+    -e "s#Environment=MONITOR_PORT=3200#Environment=MONITOR_PORT=$PORT#" \
+    openclaw-monitor-healthcheck.service.example > "$HC_UNIT"
+cp openclaw-monitor-healthcheck.timer.example "$HC_TIMER"
+
 systemctl --user daemon-reload
-systemctl --user enable --now openclaw-monitor.service
+systemctl --user enable openclaw-monitor.service
+# `enable --now` ne redémarre pas une unité déjà active : réinstaller par-dessus une
+# instance vivante laissait tourner l'ancien build sans le dire.
+systemctl --user restart openclaw-monitor.service
+systemctl --user enable --now openclaw-monitor-healthcheck.timer
 sleep 3
 systemctl --user --no-pager status openclaw-monitor.service | head -12
 
 echo
 echo "✓ http://127.0.0.1:$PORT"
+echo "✓ healthcheck every minute — journalctl --user -u openclaw-monitor-healthcheck"
