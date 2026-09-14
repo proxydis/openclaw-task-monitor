@@ -182,6 +182,8 @@ const EN: Record<string, string> = {
   'tok.approxTip': 'Partial reading: either the transcript catch-up is still running, or the value comes from the OpenClaw database, which only records one message per turn.',
   'tok.approxMark': '~',
   'tok.local': 'Read from the local Claude CLI transcripts — no API call.',
+  'tok.scopeTurn': 'Scope: this turn only — API calls made since the turn opened.',
+  'tok.scopeSession': 'Scope: the whole session — every turn since it started.',
 
   // table des process
   'th.pid': 'PID',
@@ -372,6 +374,8 @@ const FR: Record<string, string> = {
   'tok.approxTip': 'Lecture partielle : soit le rattrapage des transcripts est en cours, soit la valeur vient de la base OpenClaw, qui n’enregistre qu’un message par tour.',
   'tok.approxMark': '~',
   'tok.local': 'Relevé dans les transcripts locaux du CLI Claude — aucun appel API.',
+  'tok.scopeTurn': 'Portée : ce tour seulement — les appels API depuis son ouverture.',
+  'tok.scopeSession': 'Portée : la session entière — tous ses tours depuis le début.',
 
   'th.pid': 'PID',
   'th.role': 'Rôle',

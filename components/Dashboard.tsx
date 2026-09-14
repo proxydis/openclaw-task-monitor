@@ -264,6 +264,14 @@ function Bars({ res, cores }: { res: Res; cores: number }) {
   );
 }
 
+/** Périmètre couvert par une valeur de jetons, quand il diffère de celui de la ligne parente. */
+type UsageScope = 'turn' | 'session';
+
+/** Ligne d'infobulle qui nomme le périmètre mesuré. Vide quand il n'y a rien à lever. */
+function scopeNote(t: (k: string) => string, scope?: UsageScope): string {
+  return scope ? `\n${t(scope === 'turn' ? 'tok.scopeTurn' : 'tok.scopeSession')}` : '';
+}
+
 /**
  * Colonnes IN / OUT / CACHE d'une ligne d'arbre.
  *
@@ -272,8 +280,11 @@ function Bars({ res, cores }: { res: Res; cores: number }) {
  * rend un tiret : l'unité n'a pas de transcript lisible, ce n'est pas une mesure à zéro.
  * Un total encore incomplet — rattrapage en cours, ou repli sur la base OpenClaw — est
  * préfixé d'un `~` plutôt que présenté comme exact.
+ *
+ * `scope` lève l'ambiguïté des deux lignes voisines qui n'affichent pas le même nombre :
+ * le tour en cours ne compte que ses propres appels, sa session compte tous ses tours.
  */
-function Tokens({ usage }: { usage: TokenUsage | null }) {
+function Tokens({ usage, scope }: { usage: TokenUsage | null; scope?: UsageScope }) {
   const { lang, t } = useI18n();
   if (!usage) {
     return (
@@ -286,7 +297,7 @@ function Tokens({ usage }: { usage: TokenUsage | null }) {
   }
   const mark = usage.approx ? t('tok.approxMark') : '';
   const tip = (key: string, v: number) =>
-    `${t(key, { v: tokensFull(lang, v) })}${usage.approx ? `\n${t('tok.approxTip')}` : ''}`;
+    `${t(key, { v: tokensFull(lang, v) })}${scopeNote(t, scope)}${usage.approx ? `\n${t('tok.approxTip')}` : ''}`;
   return (
     <div className={`tokens${usage.approx ? ' approx' : ''}`}>
       <span className="tok in" title={tip('tok.inTip', usage.in)}>
@@ -334,6 +345,7 @@ function Row(props: {
   subtitle?: string;
   badges?: { text: string; cls?: string }[];
   usage?: TokenUsage | null;
+  usageScope?: UsageScope;
   res?: Res;
   cores: number;
   age?: number | null;
@@ -344,7 +356,7 @@ function Row(props: {
   onSelect: () => void;
 }) {
   const { lang } = useI18n();
-  const { state, title, subtitle, badges = [], usage, res, cores, age, hasKids, open, selected } = props;
+  const { state, title, subtitle, badges = [], usage, usageScope, res, cores, age, hasKids, open, selected } = props;
   return (
     <div
       className={`row${selected ? ' sel' : ''}`}
@@ -364,7 +376,7 @@ function Row(props: {
           {b.text}
         </span>
       ))}
-      <Tokens usage={usage ?? null} />
+      <Tokens usage={usage ?? null} scope={usageScope} />
       {res ? <Bars res={res} cores={cores} /> : <div className="metrics" />}
       <span className="age">{age ? ago(lang, age) : ''}</span>
     </div>
@@ -403,6 +415,7 @@ function TaskRows({
             ...(t.kind === 'cron' ? [{ text: tr('badge.cron'), cls: 'scheduled' }] : []),
           ]}
           usage={t.usage}
+          usageScope={t.usageScope}
           res={t.res}
           cores={cores}
           age={t.endedAt ?? t.startedAt ?? t.createdAt}
@@ -473,6 +486,7 @@ function SessionRows({
                 ...(tasks.length ? [{ text: tr('badge.tasks', { n: tasks.length }), cls: '' }] : []),
               ]}
               usage={s.usage}
+              usageScope={tasks.some((t) => t.usageScope === 'turn') ? 'session' : undefined}
               res={s.res}
               cores={cores}
               age={s.lastActivityAt}
@@ -519,11 +533,11 @@ function SessionRows({
 // ------------------------------------------------------------------ détail
 
 /** Ligne « Jetons » du panneau de détail : valeurs exactes, pas la notation courte. */
-function TokensDetail({ usage }: { usage: TokenUsage | null }) {
+function TokensDetail({ usage, scope }: { usage: TokenUsage | null; scope?: UsageScope }) {
   const { lang, t: tr } = useI18n();
   if (!usage) return <dd title={tr('tok.none')}>—</dd>;
   return (
-    <dd title={usage.approx ? tr('tok.approxTip') : tr('tok.local')}>
+    <dd title={`${usage.approx ? tr('tok.approxTip') : tr('tok.local')}${scopeNote(tr, scope)}`}>
       {usage.approx ? tr('tok.approxMark') : ''}
       {tr('v.tokens', {
         i: tokensFull(lang, usage.in),
@@ -667,7 +681,7 @@ function Detail({ sel }: { sel: Sel | null }) {
           <dt>{tr('f.cpuRam')}</dt>
           <dd>{t.res.procs ? `${t.res.cpuPct}% · ${mb(lang, t.res.rssMb)}` : '—'}</dd>
           <dt>{tr('f.tokens')}</dt>
-          <TokensDetail usage={t.usage} />
+          <TokensDetail usage={t.usage} scope={t.usageScope} />
         </dl>
         {t.summary ? (
           <>
