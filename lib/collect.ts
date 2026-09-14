@@ -18,6 +18,7 @@ import {
   type SessionMeta,
   type SubagentRow,
   type TaskRow,
+  type Transcript,
 } from './store';
 import type { AgentNode, Msg, ProcInfo, Res, SessionNode, Snapshot, TaskNode, UnitState } from './types';
 import { ZERO_RES } from './types';
@@ -50,17 +51,61 @@ const NOISE = [
   /^\s*\([A-Z][\p{L}]+\)\s*/u, // « (Neo) », « (Ada) »… ajouté par le pont Slack
 ];
 
+/** Balisage de pont retiré, retours à la ligne conservés. */
+function normalizeRequest(text: string): string {
+  // liens Slack <url|libellé> → libellé
+  let t = String(text).replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '$2').replace(/<(https?:\/\/[^>]+)>/g, '$1');
+  for (const re of NOISE) t = t.replace(re, '');
+  return t
+    .replace(/<@[A-Z0-9]+>/g, '')
+    .replace(/^[\s:•\-–]+/, '')
+    .trim();
+}
+
 export function shortTitle(text: string | null | undefined, max = 78): string {
   if (!text) return '—';
-  let t = String(text).replace(/\s+/g, ' ').trim();
-  // liens Slack <url|libellé> → libellé
-  t = t.replace(/<(https?:\/\/[^|>]+)\|([^>]+)>/g, '$2').replace(/<(https?:\/\/[^>]+)>/g, '$1');
-  for (const re of NOISE) t = t.replace(re, '');
-  t = t.replace(/<@[A-Z0-9]+>/g, '').replace(/^[\s:•\-–]+/, '').trim();
+  let t = normalizeRequest(String(text)).replace(/\s+/g, ' ').trim();
+  // une ligne d'arbre : on s'arrête à la première fin de phrase si elle tombe bien
   const stop = t.search(/[.!?\n]\s/);
   if (stop > 24 && stop < max) t = t.slice(0, stop + 1);
   if (t.length > max) t = t.slice(0, max - 1).trimEnd() + '…';
   return t || '—';
+}
+
+/**
+ * Plafond d'un énoncé affiché dans le panneau de détail. Quatre fois le plafond de
+ * lecture du transcript côté `store`, pour que la coupe vienne d'une seule source.
+ */
+const DETAIL_MAX = 4000;
+
+/** Coupe annoncée : le panneau doit dire ce qu'il ne montre pas. */
+function clipped(text: string, max = DETAIL_MAX): Msg {
+  if (text.length <= max) return text;
+  return { k: 'prompt.clipped', p: { text: text.slice(0, max).trimEnd(), n: text.length - max } };
+}
+
+/**
+ * Énoncé intégral pour le champ `detail` du panneau de droite.
+ *
+ * `shortTitle` ne convient pas ici, et c'était le bug : conçu pour tenir sur une ligne
+ * d'arbre, il coupe à la **première fin de phrase** puis plafonne à 220 caractères.
+ * Appliqué au prompt, tout ce qui suivait le premier point disparaissait — une consigne
+ * en trois phrases n'en montrait qu'une, sans le moindre « … » pour le dire.
+ */
+function detailText(text: string | null | undefined, max = DETAIL_MAX): Msg {
+  if (!text) return '—';
+  const t = normalizeRequest(String(text))
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/[ \t]*\n[ \t]*/g, '\n')
+    .replace(/\n{3,}/g, '\n\n');
+  return t ? clipped(t, max) : '—';
+}
+
+/** Énoncé venu du transcript : `store` a déjà coupé, on rétablit l'annonce de la coupe. */
+function transcriptPrompt(tr: Transcript): Msg | null {
+  if (!tr.prompt) return null;
+  const extra = tr.promptChars - tr.prompt.length;
+  return extra > 0 ? { k: 'prompt.clipped', p: { text: tr.prompt, n: extra } } : tr.prompt;
 }
 
 /** « slack:t0b7…#monitoring » → « #monitoring » */
@@ -193,7 +238,7 @@ function toTaskNode(t: TaskRow, r: Res): TaskNode {
     id: t.task_id,
     kind: 'task',
     title: taskTitle(t),
-    detail: shortTitle(t.task, 220),
+    detail: detailText(t.task),
     state: st,
     runtime: t.runtime,
     createdAt: t.created_at ?? null,
@@ -211,6 +256,7 @@ function toTaskNode(t: TaskRow, r: Res): TaskNode {
 function liveTurnNode(
   key: string,
   prompt: string | null,
+  detail: Msg | null,
   pids: number[],
   r: Res,
   procs: Map<number, RawProc>,
@@ -223,7 +269,7 @@ function liveTurnNode(
     id: `turn:${key}`,
     kind: 'task',
     title: prompt ? shortTitle(prompt, 74) : { k: 'task.liveTurn' },
-    detail: prompt ? prompt.slice(0, 600) : { k: 'task.liveTurnDetail' },
+    detail: detail ?? { k: 'task.liveTurnDetail' },
     state: 'running',
     runtime: { k: 'runtime.agentTurn' },
     createdAt: startedAt,
@@ -285,7 +331,7 @@ function systemdJobNode(j: SystemdJob, r: Res): TaskNode {
     id: `systemd:${j.unit}`,
     kind: 'task',
     title: j.unit.replace(/\.service$/, ''),
-    detail: shortTitle(jobCommand(j), 220),
+    detail: detailText(jobCommand(j)),
     state: st,
     runtime: { k: 'runtime.systemd' },
     createdAt: startedAt,
@@ -407,7 +453,7 @@ function detachedJobNode(j: DetachedJob, r: Res): TaskNode {
     id: `detached:${j.pid}`,
     kind: 'task',
     title: shortTitle(detachedTitle(j.cmd, j.pid), 60),
-    detail: shortTitle(j.cmd, 220),
+    detail: detailText(j.cmd),
     state: endedAt ? 'done' : 'running',
     runtime: { k: 'runtime.detached' },
     createdAt: j.startedAt,
@@ -633,7 +679,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
           const r = res(pids, procs);
           const tasks = (tasksBySession.get(s.child_session_key) ?? []).map((t) => toTaskNode(t, r));
           if (live && !tasks.some((t) => t.state === 'running')) {
-            tasks.unshift(liveTurnNode(s.child_session_key, s.task, pids, r, procs));
+            tasks.unshift(liveTurnNode(s.child_session_key, s.task, detailText(s.task), pids, r, procs));
           }
           return {
             key: s.child_session_key,
@@ -651,7 +697,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
             startedAt: s.started_at ?? s.created_at,
             lastActivityAt: s.ended_at ?? s.started_at ?? s.created_at,
             model: s.model,
-            prompt: s.task,
+            prompt: detailText(s.task),
             turns: 0,
             res: r,
             pids,
@@ -682,7 +728,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       const tr = readTranscript(meta?.transcript ?? null);
       const tasks = (tasksBySession.get(key) ?? []).map((t) => toTaskNode(t, r));
       if (live && !tasks.some((t) => t.state === 'running')) {
-        tasks.unshift(liveTurnNode(key, tr.prompt, pids, r, procs));
+        tasks.unshift(liveTurnNode(key, tr.prompt, transcriptPrompt(tr), pids, r, procs));
       }
       const children = buildSubagents(key);
       const lastActivity =
@@ -708,7 +754,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
         startedAt: meta?.startedAt ?? null,
         lastActivityAt: lastActivity || null,
         model: null,
-        prompt: tr.prompt,
+        prompt: transcriptPrompt(tr),
         turns: tr.userTurns,
         res: r,
         pids,

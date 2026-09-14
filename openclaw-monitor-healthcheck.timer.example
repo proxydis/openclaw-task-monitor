@@ -1,0 +1,18 @@
+[Unit]
+Description=OpenClaw Monitor healthcheck timer (every minute)
+Documentation=https://github.com/proxydis/openclaw-task-monitor
+
+[Timer]
+# Two minutes after boot so the monitor has had time to build its first snapshot,
+# then a minute after the end of each run — counting from the end, not the start,
+# so a probe that spends 30 s retrying never overlaps the next one. With three
+# probes five seconds apart, an outage is detected and repaired within roughly
+# 90 seconds worst case.
+OnBootSec=2min
+OnUnitInactiveSec=1min
+AccuracySec=10s
+Persistent=false
+Unit=openclaw-monitor-healthcheck.service
+
+[Install]
+WantedBy=timers.target

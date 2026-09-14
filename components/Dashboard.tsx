@@ -525,7 +525,7 @@ function Detail({ sel }: { sel: Sel | null }) {
           {s.prompt ? (
             <>
               <div className="section-t">{tr('f.lastRequest')}</div>
-              <div className="quote">{s.prompt}</div>
+              <div className="quote long">{m(s.prompt)}</div>
             </>
           ) : null}
           {s.tasks.length ? (
@@ -576,7 +576,7 @@ function Detail({ sel }: { sel: Sel | null }) {
           </>
         ) : null}
         <div className="section-t">{tr('f.prompt')}</div>
-        <div className="quote">{m(t.detail)}</div>
+        <div className="quote long">{m(t.detail)}</div>
         {t.error ? (
           <>
             <div className="section-t">{tr('f.error')}</div>

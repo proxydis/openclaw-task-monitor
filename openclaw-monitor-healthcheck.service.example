@@ -1,0 +1,30 @@
+[Unit]
+Description=OpenClaw Monitor healthcheck (port probe + auto-restart)
+Documentation=https://github.com/proxydis/openclaw-task-monitor
+# Deliberately no Requires=/After= on openclaw-monitor.service: this unit
+# restarts that one, and staying out of its dependency graph keeps the restart
+# job free of any ordering entanglement.
+
+[Service]
+Type=oneshot
+# Replace __APP_DIR__ with the absolute path of the repo.
+# `install.sh` generates this file automatically.
+Environment=MONITOR_PORT=3200
+Environment=MONITOR_UNIT=openclaw-monitor.service
+# Probes before giving up, seconds between them, per-request timeout.
+Environment=MONITOR_HC_ATTEMPTS=3
+Environment=MONITOR_HC_DELAY=5
+Environment=MONITOR_HC_TIMEOUT=5
+# Minimum seconds between two automatic restarts. Below this the script logs and
+# refuses to act: a service that dies again within five minutes has a different
+# problem, and restarting it in a loop would only bury the evidence.
+Environment=MONITOR_HC_COOLDOWN=300
+ExecStart=__APP_DIR__/healthcheck.sh
+# The watchdog must never be the thing that starves the machine it watches.
+MemoryMax=100M
+CPUWeight=10
+Nice=10
+TimeoutStartSec=90
+
+[Install]
+WantedBy=default.target
