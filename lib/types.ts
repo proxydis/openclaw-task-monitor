@@ -87,6 +87,13 @@ export type TaskNode = {
   res: Res;
   /** `null` quand la tâche n'est adossée à aucune session CLI (cron, job systemd) */
   usage: TokenUsage | null;
+  /**
+   * Portée de `usage`, quand elle n'est pas celle de la ligne parente. `'turn'` marque
+   * le tour en cours : sa consommation est bornée à l'ouverture du tour, donc plus
+   * petite que celle de sa session — l'interface le dit plutôt que de laisser lire deux
+   * chiffres différents sur deux lignes voisines comme une incohérence.
+   */
+  usageScope?: 'turn';
   children: TaskNode[];
 };
 

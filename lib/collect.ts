@@ -24,7 +24,7 @@ import {
   type TaskRow,
   type Transcript,
 } from './store';
-import { beginTokenCycle, readDbTokens, readSessionTokens, sumTokens } from './token-usage';
+import { beginTokenCycle, readDbTokens, readSessionTokens, readSessionTokensSince, sumTokens } from './token-usage';
 import type { AgentNode, Msg, ProcInfo, Res, SessionNode, Snapshot, TaskNode, TokenUsage, UnitState } from './types';
 import { ZERO_RES } from './types';
 
@@ -284,6 +284,32 @@ function toTaskNode(t: TaskRow, r: Res, usage: TokenUsage | null = null): TaskNo
   };
 }
 
+/**
+ * Heure d'ouverture du tour en cours.
+ *
+ * Deux bornes possibles, la première est la bonne : `session_windows.started_at`, écrit
+ * par la gateway au démarrage du tour, donc exactement l'instant cherché. Le démarrage
+ * du process CLI n'en est qu'une approximation — il précède la fenêtre de quelques
+ * secondes, et un process qui enchaîne plusieurs tours garde l'heure du premier.
+ *
+ * La fenêtre est écartée quand elle précède le process de plus de `WINDOW_SPAWN_SKEW_MS` :
+ * une ligne `running` jamais refermée (tour interrompu) date alors d'un tour révolu et
+ * ferait compter des appels qui n'appartiennent pas au tour affiché.
+ */
+function turnStartedAt(
+  windowStartedAt: number | null,
+  pids: number[],
+  procs: Map<number, RawProc>,
+): number | null {
+  const procStart = pids.reduce((min, pid) => {
+    const p = procs.get(pid);
+    return p && (min === null || p.startedAt < min) ? p.startedAt : min;
+  }, null as number | null);
+  if (windowStartedAt === null) return procStart;
+  if (procStart === null) return windowStartedAt;
+  return windowStartedAt < procStart - WINDOW_SPAWN_SKEW_MS ? procStart : windowStartedAt;
+}
+
 /** Tour en cours : synthétisé depuis le process vivant + le dernier prompt du transcript. */
 function liveTurnNode(
   key: string,
@@ -291,12 +317,9 @@ function liveTurnNode(
   detail: Msg | null,
   pids: number[],
   r: Res,
-  procs: Map<number, RawProc>,
+  startedAt: number | null,
+  usage: TokenUsage | null,
 ): TaskNode {
-  const startedAt = pids.reduce((min, pid) => {
-    const p = procs.get(pid);
-    return p && (min === null || p.startedAt < min) ? p.startedAt : min;
-  }, null as number | null);
   return {
     id: `turn:${key}`,
     kind: 'task',
@@ -311,9 +334,11 @@ function liveTurnNode(
     summary: { k: 'task.activeProcs', p: { n: pids.length } },
     error: null,
     res: r,
-    // le décompte de jetons porte sur la session entière, pas sur ce seul tour : le
-    // reporter ici ferait lire le total de la session comme le coût du tour en cours
-    usage: null,
+    // somme des seuls appels API postérieurs à l'ouverture du tour, pas le cumul de la
+    // session : un sous-ensemble de celui de la session juste au-dessus, jamais un
+    // supplément — il ne remonte donc ni vers la session ni vers l'agent
+    usage,
+    usageScope: 'turn',
     children: [],
   };
 }
@@ -605,9 +630,17 @@ export function collect(opts: { window?: number } = {}): Snapshot {
 
   // tours ouverts par agent : la seule source qui existe *pendant* le tour
   const windowsByAgent = new Map<string, RunningWindow[]>();
+  // heure d'ouverture du tour par session : borne basse de la conso du tour en cours.
+  // Les lignes arrivent triées par `started_at` décroissant, la première gagne.
+  const windowStartByKey = new Map<string, number>();
   for (const cfg of agentsCfg) {
     const w = readRunningWindows(cfg.id);
     if (w.length) windowsByAgent.set(cfg.id, w);
+    for (const win of w) {
+      if (win.startedAt !== null && !windowStartByKey.has(win.sessionKey)) {
+        windowStartByKey.set(win.sessionKey, win.startedAt);
+      }
+    }
   }
   // une session déjà reliée par son uuid CLI ne doit pas être réattribuée à un autre process
   const boundKeys = new Set(runtimeProcs.map((r) => r.sessionKey).filter((k): k is string => !!k));
@@ -749,6 +782,19 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       return u;
     };
     /**
+     * Jetons du tour en cours : les appels du `.jsonl` postérieurs à l'ouverture du tour.
+     *
+     * Délibérément hors de `tokenByOrigin` : le tour est un sous-ensemble de sa session,
+     * l'ajouter ferait compter deux fois la même consommation au niveau de l'agent. Pas
+     * de repli sur la base OpenClaw non plus — elle n'écrit qu'à la fin du tour, elle ne
+     * peut donc rien dire d'un tour en cours : tiret plutôt que zéro.
+     */
+    const turnTokensFor = (key: string, since: number | null): TokenUsage | null => {
+      if (since === null) return null;
+      const cli = cliByKey.get(key);
+      return cli ? readSessionTokensSince(cli, since) : null;
+    };
+    /**
      * Tâches d'une session, avec report des jetons sur la tâche quand — et seulement
      * quand — la correspondance est exacte.
      *
@@ -782,7 +828,18 @@ export function collect(opts: { window?: number } = {}): Snapshot {
           const usage = tokensFor(s.child_session_key, metas.get(s.child_session_key)?.sessionId ?? null);
           const tasks = taskNodes(tasksBySession.get(s.child_session_key) ?? [], r, usage);
           if (live && !tasks.some((t) => t.state === 'running')) {
-            tasks.unshift(liveTurnNode(s.child_session_key, s.task, detailText(s.task), pids, r, procs));
+            const since = turnStartedAt(windowStartByKey.get(s.child_session_key) ?? null, pids, procs);
+            tasks.unshift(
+              liveTurnNode(
+                s.child_session_key,
+                s.task,
+                detailText(s.task),
+                pids,
+                r,
+                since,
+                turnTokensFor(s.child_session_key, since),
+              ),
+            );
           }
           return {
             key: s.child_session_key,
@@ -833,7 +890,10 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       const usage = tokensFor(key, meta?.sessionId ?? null);
       const tasks = taskNodes(tasksBySession.get(key) ?? [], r, usage);
       if (live && !tasks.some((t) => t.state === 'running')) {
-        tasks.unshift(liveTurnNode(key, tr.prompt, transcriptPrompt(tr), pids, r, procs));
+        const since = turnStartedAt(windowStartByKey.get(key) ?? null, pids, procs);
+        tasks.unshift(
+          liveTurnNode(key, tr.prompt, transcriptPrompt(tr), pids, r, since, turnTokensFor(key, since)),
+        );
       }
       const children = buildSubagents(key);
       const lastActivity =
