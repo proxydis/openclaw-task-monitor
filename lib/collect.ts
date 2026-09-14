@@ -7,8 +7,10 @@ import { agentForPath, agentForText, withWorkspaces } from './workspaces';
 import {
   OC_HOME,
   REDACT,
+  agentDbPath,
   readAgents,
   readCliSessionIndex,
+  readCliSessionKeyIndex,
   readDb,
   readSessions,
   readTranscript,
@@ -19,7 +21,8 @@ import {
   type SubagentRow,
   type TaskRow,
 } from './store';
-import type { AgentNode, Msg, ProcInfo, Res, SessionNode, Snapshot, TaskNode, UnitState } from './types';
+import { beginTokenCycle, readDbTokens, readSessionTokens, sumTokens } from './token-usage';
+import type { AgentNode, Msg, ProcInfo, Res, SessionNode, Snapshot, TaskNode, TokenUsage, UnitState } from './types';
 import { ZERO_RES } from './types';
 
 function res(pids: number[], procs: Map<number, RawProc>): Res {
@@ -187,7 +190,7 @@ function taskTitle(t: TaskRow): string {
   return shortTitle(t.task);
 }
 
-function toTaskNode(t: TaskRow, r: Res): TaskNode {
+function toTaskNode(t: TaskRow, r: Res, usage: TokenUsage | null = null): TaskNode {
   const st = taskState(t);
   return {
     id: t.task_id,
@@ -203,6 +206,7 @@ function toTaskNode(t: TaskRow, r: Res): TaskNode {
     summary: t.progress_summary || t.terminal_summary || null,
     error: t.error || null,
     res: st === 'running' ? r : ZERO_RES,
+    usage,
     children: [],
   };
 }
@@ -233,6 +237,9 @@ function liveTurnNode(
     summary: { k: 'task.activeProcs', p: { n: pids.length } },
     error: null,
     res: r,
+    // le décompte de jetons porte sur la session entière, pas sur ce seul tour : le
+    // reporter ici ferait lire le total de la session comme le coût du tour en cours
+    usage: null,
     children: [],
   };
 }
@@ -263,6 +270,7 @@ function cronNode(c: CronRow): TaskNode {
     summary: c.next_run_at_ms ? { k: 'cron.next', ts: c.next_run_at_ms } : null,
     error: c.last_error || null,
     res: ZERO_RES,
+    usage: null, // aucune session CLI derrière un job cron : tiret, pas zéro
     children: [],
   };
 }
@@ -297,6 +305,7 @@ function systemdJobNode(j: SystemdJob, r: Res): TaskNode {
       : { k: 'job.result', p: { result: j.result || j.subState } },
     error: st === 'failed' || st === 'killed' ? { k: 'job.ended', p: { result: j.result || j.subState } } : null,
     res: live ? r : ZERO_RES,
+    usage: null, // job systemd : aucune session CLI à interroger
     children: [],
   };
 }
@@ -419,6 +428,7 @@ function detachedJobNode(j: DetachedJob, r: Res): TaskNode {
       : { k: 'job.detachedProcs', p: { n: r.procs, pid: j.pid } },
     error: null,
     res: endedAt ? ZERO_RES : r,
+    usage: null, // job détaché : aucune session CLI à interroger
     children: [],
   };
 }
@@ -494,6 +504,9 @@ export function collect(opts: { window?: number } = {}): Snapshot {
 
   // --- process de runtime agent (claude / codex / gemini CLI)
   const cliIndex = readCliSessionIndex(agentsCfg.map((a) => a.id));
+  // index inverse + ouverture du budget de lecture des transcripts (colonnes IN/OUT/CACHE)
+  const cliByKey = readCliSessionKeyIndex(agentsCfg.map((a) => a.id));
+  beginTokenCycle();
   const runtimeProcs: RuntimeProc[] = [];
   for (const p of procs.values()) {
     const isRuntime =
@@ -615,6 +628,45 @@ export function collect(opts: { window?: number } = {}): Snapshot {
     const built: SessionNode[] = [];
     const subagentKeys = new Set<string>();
 
+    /**
+     * Jetons d'une session, indexés par *origine* (identifiant de session CLI, ou
+     * identifiant OpenClaw pour le repli SQLite). Passer par une table évite le double
+     * comptage au niveau de l'agent : la même session vue deux fois — comme session et
+     * comme session fille d'une tâche déléguée — n'est sommée qu'une fois.
+     */
+    const dbFile = agentDbPath(cfg.id);
+    const tokenByOrigin = new Map<string, TokenUsage>();
+    const tokensFor = (key: string, sessionId: string | null): TokenUsage | null => {
+      const cli = cliByKey.get(key);
+      if (cli) {
+        // `.jsonl` du CLI : une ligne par appel API, écrite pendant le tour
+        const u = readSessionTokens(cli);
+        if (u) {
+          tokenByOrigin.set(cli, u);
+          return u;
+        }
+      }
+      // repli : session dont le transcript CLI a disparu. Jamais additionné au précédent.
+      if (!sessionId) return null;
+      const u = readDbTokens(dbFile, sessionId);
+      if (u) tokenByOrigin.set(`db:${sessionId}`, u);
+      return u;
+    };
+    /**
+     * Tâches d'une session, avec report des jetons sur la tâche quand — et seulement
+     * quand — la correspondance est exacte.
+     *
+     * Le transcript du CLI porte des appels API horodatés, pas des bornes de tâche : il
+     * ne permet pas de ventiler une session entre plusieurs tâches. Tant qu'une seule
+     * tâche s'adosse à la session, son total *est* celui de la tâche. Dès qu'il y en a
+     * plusieurs, répéter ce total sur chaque ligne laisserait croire à autant de
+     * consommations distinctes — ces lignes gardent donc un tiret.
+     */
+    const taskNodes = (rows: TaskRow[], r: Res, usage: TokenUsage | null): TaskNode[] => {
+      const lone = rows.length === 1 ? rows[0] : null;
+      return rows.map((t) => toTaskNode(t, r, t === lone ? usage : null));
+    };
+
     const buildSubagents = (parentKey: string): SessionNode[] => {
       const rows = subsByRequester.get(parentKey) ?? [];
       return rows
@@ -631,7 +683,8 @@ export function collect(opts: { window?: number } = {}): Snapshot {
           else if (/error|fail/i.test(s.ended_reason ?? '')) st = 'failed';
           else st = 'done';
           const r = res(pids, procs);
-          const tasks = (tasksBySession.get(s.child_session_key) ?? []).map((t) => toTaskNode(t, r));
+          const usage = tokensFor(s.child_session_key, metas.get(s.child_session_key)?.sessionId ?? null);
+          const tasks = taskNodes(tasksBySession.get(s.child_session_key) ?? [], r, usage);
           if (live && !tasks.some((t) => t.state === 'running')) {
             tasks.unshift(liveTurnNode(s.child_session_key, s.task, pids, r, procs));
           }
@@ -654,6 +707,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
             prompt: s.task,
             turns: 0,
             res: r,
+            usage,
             pids,
             tasks,
             children: buildSubagents(s.child_session_key),
@@ -680,7 +734,8 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       const live = pids.length > 0;
       const r = res(pids, procs);
       const tr = readTranscript(meta?.transcript ?? null);
-      const tasks = (tasksBySession.get(key) ?? []).map((t) => toTaskNode(t, r));
+      const usage = tokensFor(key, meta?.sessionId ?? null);
+      const tasks = taskNodes(tasksBySession.get(key) ?? [], r, usage);
       if (live && !tasks.some((t) => t.state === 'running')) {
         tasks.unshift(liveTurnNode(key, tr.prompt, pids, r, procs));
       }
@@ -711,6 +766,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
         prompt: tr.prompt,
         turns: tr.userTurns,
         res: r,
+        usage,
         pids,
         tasks,
         children,
@@ -739,6 +795,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
         prompt: null,
         turns: 0,
         res: ZERO_RES,
+        usage: null,
         pids: [],
         tasks,
         children: [],
@@ -776,6 +833,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
         prompt: null,
         turns: 0,
         res: jobRes,
+        usage: null,
         pids: [...jobs.flatMap((j) => j.pids), ...detached.flatMap((d) => d.pids)],
         tasks: jobNodes,
         children: [],
@@ -821,6 +879,9 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       model: cfg.model,
       state: st,
       res: agentRes,
+      // somme des origines distinctes, pas de l'arbre : un parent et sa tâche déléguée
+      // renvoient le même total, les sommer le compterait deux fois
+      usage: sumTokens(tokenByOrigin.values()),
       lastActivityAt: lastAct || null,
       stats: {
         liveSessions: live,
