@@ -65,7 +65,7 @@ export type SessionMeta = {
 };
 
 /** Base par agent (OpenClaw >= 2026.9.2) : sessions et transcripts migrés du disque vers SQLite. */
-function agentDbPath(agentId: string): string {
+export function agentDbPath(agentId: string): string {
   return path.join(OC_HOME, 'agents', agentId, 'agent', 'openclaw-agent.sqlite');
 }
 
@@ -176,6 +176,7 @@ export type CliSessionRef = { agentId: string; sessionKey: string };
 
 const cliCache = new Map<string, { sig: string; data: Map<string, string> }>();
 let cliIndexCache: { sig: string; data: Map<string, CliSessionRef> } | null = null;
+let cliByKeyCache: { sig: string; data: Map<string, string> } | null = null;
 
 /**
  * Identifiant de session `claude-cli` porté par une entrée `session_nodes`, à trois
@@ -237,6 +238,28 @@ export function readCliSessionIndex(agentIds: string[]): Map<string, CliSessionR
     for (const [cliId, sessionKey] of map) if (!data.has(cliId)) data.set(cliId, { agentId, sessionKey });
   }
   cliIndexCache = { sig, data };
+  return data;
+}
+
+/**
+ * Index inverse `session_key → cliSessionId`, pour retrouver le transcript du CLI Claude
+ * d'une session OpenClaw (colonnes de jetons, cf. `lib/token-usage.ts`).
+ *
+ * Une entrée `session_nodes` ne porte qu'un identifiant CLI courant : une session
+ * OpenClaw ancienne dont le CLI a reforké (compactage) ne rend compte que de son dernier
+ * segment. C'est la limite assumée de cette jointure, il n'existe pas d'historique des
+ * identifiants CLI en base.
+ */
+export function readCliSessionKeyIndex(agentIds: string[]): Map<string, string> {
+  const parts = agentIds.map((id) => [id, readCliSessionIds(id)] as const);
+  const sig = parts.map(([id]) => `${id}=${cliCache.get(id)?.sig ?? '-'}`).join('|');
+  if (cliByKeyCache && cliByKeyCache.sig === sig) return cliByKeyCache.data;
+  const data = new Map<string, string>();
+  for (const [, map] of parts) {
+    // `readCliSessionIds` trie du plus récent au plus ancien : la première clé gagne
+    for (const [cliId, sessionKey] of map) if (!data.has(sessionKey)) data.set(sessionKey, cliId);
+  }
+  cliByKeyCache = { sig, data };
   return data;
 }
 

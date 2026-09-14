@@ -1,6 +1,6 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
+import { claudeCliDir } from './claude-cli';
 import type { Msg, PlanLimit, PlanUsage } from './types';
 
 /**
@@ -55,10 +55,8 @@ function envMs(name: string, fallback: number): number {
 
 // ------------------------------------------------------------------ jeton local
 
-/** Répertoire de configuration du CLI Claude (`CLAUDE_CONFIG_DIR`, sinon `~/.claude`). */
 function credentialsPath(): string {
-  const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-  return path.join(dir, '.credentials.json');
+  return path.join(claudeCliDir(), '.credentials.json');
 }
 
 /** Jeton OAuth du CLI local, ou `null` si aucune session exploitable n'est présente. */

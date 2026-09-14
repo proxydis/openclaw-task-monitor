@@ -164,6 +164,18 @@ button { font: inherit; color: inherit; }
 .badge.kind { color: var(--accent); border-color: rgba(56,189,248,.25); background: rgba(56,189,248,.07); }
 .badge.sub { color: var(--pink); border-color: rgba(244,114,182,.28); background: rgba(244,114,182,.07); }
 
+/* colonnes IN / OUT / CACHE : trois cellules de largeur fixe, alignées d'une ligne à l'autre */
+.tokens {
+  display: flex; gap: 0; align-items: center; flex: none;
+  font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.tokens .tok { width: 52px; text-align: right; padding-left: 6px; color: var(--txt-dim); }
+.tokens .tok.out { color: var(--accent); }
+/* le cache est relu, facturé ~10 % : il ne doit pas peser visuellement comme le reste */
+.tokens .tok.cache { color: var(--txt-faint); }
+.tokens.none .tok { color: var(--txt-faint); opacity: .38; }
+.tokens.approx .tok { opacity: .72; font-style: italic; }
+
 .metrics { display: flex; gap: 10px; align-items: center; flex: none; font-family: var(--mono); font-size: 11px; color: var(--txt-dim); }
 .metric { display: flex; align-items: center; gap: 5px; min-width: 76px; justify-content: flex-end; }
 .metric .bar { width: 34px; height: 4px; border-radius: 3px; background: var(--line-soft); overflow: hidden; }
@@ -171,6 +183,16 @@ button { font: inherit; color: inherit; }
 .metric.mem .bar > i { background: var(--purple); }
 .metric.zero { opacity: .32; }
 .age { font-family: var(--mono); font-size: 11px; color: var(--txt-faint); width: 62px; text-align: right; flex: none; }
+
+/* en-tête des colonnes numériques : même gabarit qu'une ligne, sans interaction */
+.row.head {
+  min-height: 0; padding: 2px 10px 5px; cursor: default; font-size: 10px;
+  letter-spacing: .4px; color: var(--txt-faint); text-transform: uppercase;
+}
+.row.head:hover { background: transparent; }
+.row.head .dot { background: transparent; }
+.row.head .tokens .tok, .row.head .metrics .metric { color: var(--txt-faint); }
+.row.head .metrics .metric { min-width: 76px; }
 
 .kids { margin-left: 15px; padding-left: 11px; border-left: 1px solid var(--line-soft); }
 

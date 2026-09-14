@@ -74,6 +74,36 @@ export function mbShort(lang: Lang, v: number): string {
   return t(lang, 'fmt.mbShort', { v: Math.round(v) });
 }
 
+const NF = new Map<string, Intl.NumberFormat>();
+
+/** `Intl.NumberFormat` mémorisé : une instance par (langue, décimales), pas une par cellule. */
+function nf(lang: Lang, digits: number): Intl.NumberFormat {
+  const key = `${lang}:${digits}`;
+  let f = NF.get(key);
+  if (!f) {
+    f = new Intl.NumberFormat(locale(lang), { maximumFractionDigits: digits });
+    NF.set(key, f);
+  }
+  return f;
+}
+
+/**
+ * Jetons en notation courte, pour une colonne large de quelques caractères :
+ * « 812 », « 12,3k », « 145k », « 1,2M ». Le séparateur décimal suit la langue.
+ */
+export function tokens(lang: Lang, v: number | null | undefined): string {
+  if (v == null) return '—';
+  if (v < 1000) return nf(lang, 0).format(Math.round(v));
+  if (v < 1_000_000) return t(lang, 'fmt.tokK', { v: nf(lang, v < 100_000 ? 1 : 0).format(v / 1000) });
+  return t(lang, 'fmt.tokM', { v: nf(lang, v < 100_000_000 ? 1 : 0).format(v / 1_000_000) });
+}
+
+/** Valeur exacte, groupée par milliers — réservée aux infobulles et au panneau de détail. */
+export function tokensFull(lang: Lang, v: number | null | undefined): string {
+  if (v == null) return '—';
+  return nf(lang, 0).format(v);
+}
+
 export function lvl(pct: number): 'ok' | 'warn' | 'err' {
   if (pct >= 90) return 'err';
   if (pct >= 70) return 'warn';

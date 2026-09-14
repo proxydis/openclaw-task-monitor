@@ -30,6 +30,35 @@ export type Res = {
 
 export const ZERO_RES: Res = { cpuPct: 0, rssMb: 0, procs: 0 };
 
+/**
+ * Jetons consommés par une unité de travail, relevés **sur disque uniquement** : aucun
+ * appel réseau, aucun appel modèle, aucun jeton dépensé par la mesure elle-même.
+ *
+ * Le découpage suit la facturation, pas la nomenclature de l'API. `input_tokens` brut
+ * ne veut rien dire seul : sur un tour mesuré il valait 24 pendant que
+ * `cache_read_input_tokens` valait 740 822. Afficher l'un sans l'autre fait passer un
+ * tour quasi gratuit pour un tour à 780 k jetons.
+ *
+ * `out` inclut déjà les jetons de raisonnement (`output_tokens_details.thinking_tokens`
+ * est une ventilation d'`output_tokens`, pas un supplément) : ne jamais les rajouter.
+ */
+export type TokenUsage = {
+  /** facturé plein tarif : `input_tokens` + `cache_creation_input_tokens` */
+  in: number;
+  /** `output_tokens`, raisonnement compris */
+  out: number;
+  /** `cache_read_input_tokens` — relu, facturé ~10 % */
+  cache: number;
+  /**
+   * Valeur incomplète ou dégradée, à signaler comme telle dans l'interface :
+   * soit le rattrapage du `.jsonl` n'est pas terminé (budget par cycle), soit elle vient
+   * du repli SQLite qui ne voit qu'un message par tour au lieu d'un par appel API.
+   */
+  approx?: boolean;
+};
+
+export const ZERO_TOKENS: TokenUsage = { in: 0, out: 0, cache: 0 };
+
 export type ProcInfo = {
   pid: number;
   ppid: number;
@@ -56,6 +85,8 @@ export type TaskNode = {
   summary: Msg | null;
   error: Msg | null;
   res: Res;
+  /** `null` quand la tâche n'est adossée à aucune session CLI (cron, job systemd) */
+  usage: TokenUsage | null;
   children: TaskNode[];
 };
 
@@ -74,6 +105,8 @@ export type SessionNode = {
   prompt: Msg | null;
   turns: number;
   res: Res;
+  /** `null` quand aucun transcript n'est lisible : l'interface affiche un tiret, pas un 0 */
+  usage: TokenUsage | null;
   pids: number[];
   tasks: TaskNode[];
   children: SessionNode[];
@@ -86,6 +119,8 @@ export type AgentNode = {
   model: string | null;
   state: UnitState;
   res: Res;
+  /** somme des sessions de l'agent, dédupliquée par session CLI (cf. `collect`) */
+  usage: TokenUsage | null;
   lastActivityAt: number | null;
   stats: {
     liveSessions: number;

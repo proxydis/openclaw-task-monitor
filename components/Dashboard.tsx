@@ -1,10 +1,21 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { AgentNode, PlanLimit, PlanUsage, ProcInfo, Res, SessionNode, Snapshot, TaskNode, UnitState } from '@/lib/types';
+import type {
+  AgentNode,
+  PlanLimit,
+  PlanUsage,
+  ProcInfo,
+  Res,
+  SessionNode,
+  Snapshot,
+  TaskNode,
+  TokenUsage,
+  UnitState,
+} from '@/lib/types';
 import { agentStateLabel, stateLabel } from '@/lib/i18n';
 import { LangProvider, LangSwitch, useI18n } from './LangProvider';
-import { ago, agoRel, clock, dur, lvl, mb, mbShort, resetIn } from './format';
+import { ago, agoRel, clock, dur, lvl, mb, mbShort, resetIn, tokens, tokensFull } from './format';
 import CrabLogo from './CrabLogo';
 
 // ------------------------------------------------------------------ flux
@@ -253,12 +264,76 @@ function Bars({ res, cores }: { res: Res; cores: number }) {
   );
 }
 
+/**
+ * Colonnes IN / OUT / CACHE d'une ligne d'arbre.
+ *
+ * Trois cellules monospace de largeur fixe, alignées à droite, pour que les ordres de
+ * grandeur se comparent d'une ligne à l'autre sans lire les chiffres. `usage` à `null`
+ * rend un tiret : l'unité n'a pas de transcript lisible, ce n'est pas une mesure à zéro.
+ * Un total encore incomplet — rattrapage en cours, ou repli sur la base OpenClaw — est
+ * préfixé d'un `~` plutôt que présenté comme exact.
+ */
+function Tokens({ usage }: { usage: TokenUsage | null }) {
+  const { lang, t } = useI18n();
+  if (!usage) {
+    return (
+      <div className="tokens none" title={t('tok.none')}>
+        <span className="tok">—</span>
+        <span className="tok">—</span>
+        <span className="tok">—</span>
+      </div>
+    );
+  }
+  const mark = usage.approx ? t('tok.approxMark') : '';
+  const tip = (key: string, v: number) =>
+    `${t(key, { v: tokensFull(lang, v) })}${usage.approx ? `\n${t('tok.approxTip')}` : ''}`;
+  return (
+    <div className={`tokens${usage.approx ? ' approx' : ''}`}>
+      <span className="tok in" title={tip('tok.inTip', usage.in)}>
+        {mark}
+        {tokens(lang, usage.in)}
+      </span>
+      <span className="tok out" title={tip('tok.outTip', usage.out)}>
+        {mark}
+        {tokens(lang, usage.out)}
+      </span>
+      <span className="tok cache" title={tip('tok.cacheTip', usage.cache)}>
+        {mark}
+        {tokens(lang, usage.cache)}
+      </span>
+    </div>
+  );
+}
+
+/** En-tête des colonnes numériques, aligné sur les largeurs fixes de `Tokens` et `Bars`. */
+function TreeHead() {
+  const { t } = useI18n();
+  return (
+    <div className="row head" title={t('tok.local')}>
+      <span className="caret leaf">▶</span>
+      <span className="dot" />
+      <span className="title" />
+      <div className="tokens">
+        <span className="tok">{t('tok.in')}</span>
+        <span className="tok">{t('tok.out')}</span>
+        <span className="tok">{t('tok.cache')}</span>
+      </div>
+      <div className="metrics">
+        <span className="metric">{t('th.cpu')}</span>
+        <span className="metric mem">{t('th.rss')}</span>
+      </div>
+      <span className="age">{t('th.age')}</span>
+    </div>
+  );
+}
+
 function Row(props: {
   depth: number;
   state: UnitState;
   title: string;
   subtitle?: string;
   badges?: { text: string; cls?: string }[];
+  usage?: TokenUsage | null;
   res?: Res;
   cores: number;
   age?: number | null;
@@ -269,7 +344,7 @@ function Row(props: {
   onSelect: () => void;
 }) {
   const { lang } = useI18n();
-  const { state, title, subtitle, badges = [], res, cores, age, hasKids, open, selected } = props;
+  const { state, title, subtitle, badges = [], usage, res, cores, age, hasKids, open, selected } = props;
   return (
     <div
       className={`row${selected ? ' sel' : ''}`}
@@ -289,6 +364,7 @@ function Row(props: {
           {b.text}
         </span>
       ))}
+      <Tokens usage={usage ?? null} />
       {res ? <Bars res={res} cores={cores} /> : <div className="metrics" />}
       <span className="age">{age ? ago(lang, age) : ''}</span>
     </div>
@@ -326,6 +402,7 @@ function TaskRows({
             { text: stateLabel(lang, t.state), cls: t.state },
             ...(t.kind === 'cron' ? [{ text: tr('badge.cron'), cls: 'scheduled' }] : []),
           ]}
+          usage={t.usage}
           res={t.res}
           cores={cores}
           age={t.endedAt ?? t.startedAt ?? t.createdAt}
@@ -395,6 +472,7 @@ function SessionRows({
                 ...(s.state === 'running' ? [{ text: stateLabel(lang, 'running'), cls: 'running' }] : []),
                 ...(tasks.length ? [{ text: tr('badge.tasks', { n: tasks.length }), cls: '' }] : []),
               ]}
+              usage={s.usage}
               res={s.res}
               cores={cores}
               age={s.lastActivityAt}
@@ -440,6 +518,22 @@ function SessionRows({
 
 // ------------------------------------------------------------------ détail
 
+/** Ligne « Jetons » du panneau de détail : valeurs exactes, pas la notation courte. */
+function TokensDetail({ usage }: { usage: TokenUsage | null }) {
+  const { lang, t: tr } = useI18n();
+  if (!usage) return <dd title={tr('tok.none')}>—</dd>;
+  return (
+    <dd title={usage.approx ? tr('tok.approxTip') : tr('tok.local')}>
+      {usage.approx ? tr('tok.approxMark') : ''}
+      {tr('v.tokens', {
+        i: tokensFull(lang, usage.in),
+        o: tokensFull(lang, usage.out),
+        c: tokensFull(lang, usage.cache),
+      })}
+    </dd>
+  );
+}
+
 function Detail({ sel }: { sel: Sel | null }) {
   const { lang, t: tr, m } = useI18n();
 
@@ -474,6 +568,8 @@ function Detail({ sel }: { sel: Sel | null }) {
             <dd>{tr('v.cpuProcs', { p: a.res.cpuPct, n: a.res.procs })}</dd>
             <dt>{tr('f.memory')}</dt>
             <dd>{mb(lang, a.res.rssMb)}</dd>
+            <dt>{tr('f.tokens')}</dt>
+            <TokensDetail usage={a.usage} />
             <dt>{tr('f.lastActivity')}</dt>
             <dd>{clock(lang, a.lastActivityAt)}</dd>
           </dl>
@@ -521,6 +617,8 @@ function Detail({ sel }: { sel: Sel | null }) {
             </dd>
             <dt>{tr('f.processes')}</dt>
             <dd>{s.pids.length ? s.pids.slice(0, 12).join(', ') : tr('v.noProcs')}</dd>
+            <dt>{tr('f.tokens')}</dt>
+            <TokensDetail usage={s.usage} />
           </dl>
           {s.prompt ? (
             <>
@@ -568,6 +666,8 @@ function Detail({ sel }: { sel: Sel | null }) {
           <dd>{dur(lang, t.durationMs)}</dd>
           <dt>{tr('f.cpuRam')}</dt>
           <dd>{t.res.procs ? `${t.res.cpuPct}% · ${mb(lang, t.res.rssMb)}` : '—'}</dd>
+          <dt>{tr('f.tokens')}</dt>
+          <TokensDetail usage={t.usage} />
         </dl>
         {t.summary ? (
           <>
@@ -932,6 +1032,7 @@ function DashboardInner() {
           ) : (
             <div className="body">
               {agents.length === 0 ? <div className="empty">{tr('ui.noAgents')}</div> : null}
+              {agents.length ? <TreeHead /> : null}
               {agents.map((a) => {
                 const id = `a:${a.id}`;
                 const isOpen = open.has(id);
@@ -955,6 +1056,7 @@ function DashboardInner() {
                           ? [{ text: tr('badge.failed', { n: a.stats.failed24h }), cls: 'failed' }]
                           : []),
                       ]}
+                      usage={a.usage}
                       res={a.res}
                       cores={h.cores}
                       age={a.lastActivityAt}

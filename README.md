@@ -16,6 +16,11 @@ produces: the SQLite state database, session files, transcripts and `/proc`.
 - **State** of every unit: running · idle · paused · finished · failed · killed · scheduled
 - **CPU and RAM per unit** — CPU is a percentage of one core (like `top`), RAM is the
   cumulative RSS of the whole process subtree attached to the unit
+- **Tokens per unit — `IN` / `OUT` / `CACHE` columns**, read from the local Claude CLI
+  transcripts: no API call, no token spent by the measurement itself. `IN` covers input plus
+  cache writes (full rate), `OUT` the generation (reasoning included), `CACHE` the context
+  read back (~10% of the input rate). A dash means “nothing measurable”, not “zero”; a `~`
+  marks a value that is still incomplete or comes from the SQLite fallback
 - **Short task title**, extracted from the last user message of the transcript, to tell
   at a glance what the work in progress is about
 - **Machine health**: CPU, memory, swap, load, gateway uptime
@@ -159,7 +164,10 @@ process, titled with the last user message of the session.
 ## Cost of a snapshot
 
 One `/proc` scan, four SQLite queries and a few file-tail reads: 20 to 300 ms, ~60 MB of
-RSS. The snapshot is shared across every client — at most one scan every 1.5 s — and pushed
+RSS. The token columns add ~4 ms per cycle: the Claude CLI transcripts (up to 27 MB each,
+~1 GB in total) are read **incrementally** — only the bytes appended since the previous
+cycle, with a short-circuit on unchanged size and `mtime` and an 8 MB per-cycle budget while
+catching up at startup (see `lib/token-usage.ts`). The snapshot is shared across every client — at most one scan every 1.5 s — and pushed
 over SSE every 2 s. The service is capped at `MemoryMax=600M`.
 
 ## API
