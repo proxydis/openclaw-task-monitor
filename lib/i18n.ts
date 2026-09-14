@@ -127,7 +127,7 @@ const EN: Record<string, string> = {
   'badge.runningTasks': '{n} running',
   'badge.subagents': '{n} subagents',
   'badge.failed': '{n} failure(s)',
-  'legend.note': 'CPU = % of one core · RAM = cumulative RSS of the subtree',
+  'legend.note': 'CPU = % of one core · RAM = cumulative RSS of the subtree · IN/OUT/CACHE = tokens read from local transcripts',
 
   // détail
   'detail.title': 'Details',
@@ -162,11 +162,26 @@ const EN: Record<string, string> = {
   'f.progress': 'Progress',
   'f.prompt': 'Prompt',
   'f.error': 'Error',
+  'f.tokens': 'Tokens',
+  'v.tokens': 'IN {i} · OUT {o} · CACHE {c}',
   'v.sessionsOf': '{n} incl. {live} active',
   'v.tasksOf': '{n} · {r} running',
   'v.cpuProcs': '{p}% · {n} process(es)',
   'v.noProcs': 'none (idle session)',
   'v.tasksTitle': 'Tasks ({n})',
+
+  // jetons (colonnes IN / OUT / CACHE)
+  'tok.in': 'IN',
+  'tok.out': 'OUT',
+  'tok.cache': 'CACHE',
+  'tok.title': 'Tokens',
+  'tok.inTip': 'IN — {v} tokens billed at full rate (input + cache writes)',
+  'tok.outTip': 'OUT — {v} tokens generated, reasoning included',
+  'tok.cacheTip': 'CACHE — {v} tokens read back from the prompt cache (~10% of the input rate)',
+  'tok.none': 'No readable transcript for this unit — nothing measured, not zero.',
+  'tok.approxTip': 'Partial reading: either the transcript catch-up is still running, or the value comes from the OpenClaw database, which only records one message per turn.',
+  'tok.approxMark': '~',
+  'tok.local': 'Read from the local Claude CLI transcripts — no API call.',
 
   // table des process
   'th.pid': 'PID',
@@ -192,6 +207,8 @@ const EN: Record<string, string> = {
   'fmt.mbShort': '{v}M',
   'fmt.cpuTip': "{p}% of one core · {n} process(es)",
   'fmt.memTip': '{v} of cumulative RSS',
+  'fmt.tokK': '{v}k',
+  'fmt.tokM': '{v}M',
 };
 
 const FR: Record<string, string> = {
@@ -301,7 +318,7 @@ const FR: Record<string, string> = {
   'badge.runningTasks': '{n} en cours',
   'badge.subagents': '{n} sous-agents',
   'badge.failed': '{n} échec(s)',
-  'legend.note': 'CPU = % d’un cœur · RAM = RSS cumulé du sous-arbre',
+  'legend.note': 'CPU = % d’un cœur · RAM = RSS cumulé du sous-arbre · IN/OUT/CACHE = jetons lus dans les transcripts locaux',
 
   'detail.title': 'Détail',
   'detail.empty': 'Sélectionne un agent, une session ou une tâche dans l’arbre.',
@@ -335,11 +352,26 @@ const FR: Record<string, string> = {
   'f.progress': 'Progression',
   'f.prompt': 'Énoncé',
   'f.error': 'Erreur',
+  'f.tokens': 'Jetons',
+  'v.tokens': 'IN {i} · OUT {o} · CACHE {c}',
   'v.sessionsOf': '{n} dont {live} active(s)',
   'v.tasksOf': '{n} · {r} en cours',
   'v.cpuProcs': '{p}% · {n} process',
   'v.noProcs': 'aucun (session au repos)',
   'v.tasksTitle': 'Tâches ({n})',
+
+  // jetons (colonnes IN / OUT / CACHE)
+  'tok.in': 'IN',
+  'tok.out': 'OUT',
+  'tok.cache': 'CACHE',
+  'tok.title': 'Jetons',
+  'tok.inTip': 'IN — {v} jetons facturés plein tarif (entrée + écritures de cache)',
+  'tok.outTip': 'OUT — {v} jetons produits, raisonnement compris',
+  'tok.cacheTip': 'CACHE — {v} jetons relus depuis le cache de contexte (~10 % du tarif d’entrée)',
+  'tok.none': 'Aucun transcript lisible pour cette unité — rien de mesuré, ce n’est pas un zéro.',
+  'tok.approxTip': 'Lecture partielle : soit le rattrapage des transcripts est en cours, soit la valeur vient de la base OpenClaw, qui n’enregistre qu’un message par tour.',
+  'tok.approxMark': '~',
+  'tok.local': 'Relevé dans les transcripts locaux du CLI Claude — aucun appel API.',
 
   'th.pid': 'PID',
   'th.role': 'Rôle',
@@ -363,6 +395,8 @@ const FR: Record<string, string> = {
   'fmt.mbShort': '{v}M',
   'fmt.cpuTip': '{p}% d’un cœur · {n} process',
   'fmt.memTip': '{v} de RSS cumulé',
+  'fmt.tokK': '{v}k',
+  'fmt.tokM': '{v}M',
 };
 
 const DICT: Record<Lang, Record<string, string>> = { en: EN, fr: FR };

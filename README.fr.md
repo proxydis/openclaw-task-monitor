@@ -17,6 +17,11 @@ déjà produites par OpenClaw : base d'état SQLite, fichiers de sessions, trans
 - **État** de chaque unité : en cours · inactif · suspendue · terminée · échouée · tuée · planifiée
 - **CPU et RAM par unité** — le CPU est un pourcentage d'un cœur (comme `top`), la RAM le RSS
   cumulé de tout le sous-arbre de process rattaché à l'unité
+- **Jetons par unité — colonnes `IN` / `OUT` / `CACHE`**, lues dans les transcripts locaux du
+  CLI Claude : aucun appel API, aucun jeton dépensé par la mesure. `IN` regroupe l'entrée et
+  les écritures de cache (plein tarif), `OUT` la génération (raisonnement compris), `CACHE`
+  le contexte relu (~10 % du tarif d'entrée). Un tiret signifie « rien de mesurable »,
+  pas « zéro » ; un `~` signale une valeur encore incomplète ou issue du repli SQLite
 - **Titre court de la tâche**, extrait du dernier message utilisateur du transcript, pour
   identifier d'un coup d'œil la nature du travail en cours
 - **Santé machine** : CPU, mémoire, swap, load, uptime de la gateway
@@ -161,7 +166,10 @@ partir d'un process vivant, titré avec le dernier message utilisateur de la ses
 ## Coût d'un instantané
 
 Un scan `/proc`, quatre requêtes SQLite et quelques lectures de queue de fichier : 20 à 300 ms,
-~60 Mo de RSS. L'instantané est mutualisé entre tous les clients — au plus un scan toutes les
+~60 Mo de RSS. Les colonnes de jetons ajoutent ~4 ms par cycle : les transcripts du CLI
+(jusqu'à 27 Mo pièce, ~1 Go au total) sont lus **de façon incrémentale** — seuls les octets
+ajoutés depuis le cycle précédent, avec court-circuit sur taille et `mtime` inchangés et un
+budget de 8 Mo par cycle au démarrage (voir `lib/token-usage.ts`). L'instantané est mutualisé entre tous les clients — au plus un scan toutes les
 1,5 s — et diffusé en SSE toutes les 2 s. Le service est plafonné à `MemoryMax=600M`.
 
 ## API
