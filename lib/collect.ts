@@ -10,11 +10,13 @@ import {
   readAgents,
   readCliSessionIndex,
   readDb,
+  readRunningWindows,
   readSessions,
   readTranscript,
   type AgentCfg,
   type CliSessionRef,
   type CronRow,
+  type RunningWindow,
   type SessionMeta,
   type SubagentRow,
   type TaskRow,
@@ -207,6 +209,32 @@ export function resolveFromCmdline(
     sessionKey: hit?.sessionKey ?? null,
     model: cmd.match(/--model[\s=]+(\S+)/)?.[1] ?? null,
   };
+}
+
+/**
+ * Tolérance entre l'ouverture du tour en base et le démarrage du process CLI. La gateway
+ * écrit la ligne `session_windows` juste avant de lancer `claude`, mais rien ne garantit
+ * l'ordre à la milliseconde : le relevé en direct a montré le process démarré ~6 s *avant*
+ * l'horodatage de sa propre fenêtre.
+ */
+const WINDOW_SPAWN_SKEW_MS = 120_000;
+
+/**
+ * Session d'un process CLI que sa ligne de commande n'a pas suffi à identifier.
+ *
+ * On retient le tour ouvert le plus récent qui n'a pas démarré *après* le process, hors
+ * tours déjà réclamés. C'est le filet qui manquait : `session_nodes.cliSessionIds`, seul
+ * chemin jusqu'ici, n'est écrit qu'à la fin du tour, donc le travail en cours restait
+ * anonyme — rattaché à l'agent mais à aucune session.
+ */
+function windowForProc(windows: RunningWindow[], startedAt: number, taken: Set<string>): RunningWindow | null {
+  let best: RunningWindow | null = null;
+  for (const w of windows) {
+    if (taken.has(w.sessionKey)) continue;
+    if (w.startedAt !== null && w.startedAt > startedAt + WINDOW_SPAWN_SKEW_MS) continue;
+    if (!best || (w.startedAt ?? 0) > (best.startedAt ?? 0)) best = w;
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------- tâches
@@ -562,13 +590,35 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   const agentLoosePids = new Map<string, number[]>(); // agentId -> pids sans session identifiée
   const claimed = new Set<number>();
 
-  for (const rp of runtimeProcs) {
+  // tours ouverts par agent : la seule source qui existe *pendant* le tour
+  const windowsByAgent = new Map<string, RunningWindow[]>();
+  for (const cfg of agentsCfg) {
+    const w = readRunningWindows(cfg.id);
+    if (w.length) windowsByAgent.set(cfg.id, w);
+  }
+  // une session déjà reliée par son uuid CLI ne doit pas être réattribuée à un autre process
+  const boundKeys = new Set(runtimeProcs.map((r) => r.sessionKey).filter((k): k is string => !!k));
+
+  // du process le plus récent au plus ancien : un sous-agent réclame son propre tour avant son parent
+  const byRecency = [...runtimeProcs].sort(
+    (a, b) => (procs.get(b.pid)?.startedAt ?? 0) - (procs.get(a.pid)?.startedAt ?? 0),
+  );
+  for (const rp of byRecency) {
     const tree = descendants(rp.pid, kids, new Set([...runtimeRoots].filter((x) => x !== rp.pid)));
     for (const pid of tree) claimed.add(pid);
-    if (rp.sessionKey) {
-      const arr = sessionPids.get(rp.sessionKey) ?? [];
+    let key = rp.sessionKey;
+    if (!key && rp.agentId) {
+      const startedAt = procs.get(rp.pid)?.startedAt ?? Date.now();
+      const w = windowForProc(windowsByAgent.get(rp.agentId) ?? [], startedAt, boundKeys);
+      if (w) {
+        key = w.sessionKey;
+        boundKeys.add(w.sessionKey);
+      }
+    }
+    if (key) {
+      const arr = sessionPids.get(key) ?? [];
       arr.push(...tree);
-      sessionPids.set(rp.sessionKey, arr);
+      sessionPids.set(key, arr);
     } else if (rp.agentId) {
       const arr = agentLoosePids.get(rp.agentId) ?? [];
       arr.push(...tree);
