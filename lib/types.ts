@@ -137,6 +137,7 @@ export type HostInfo = {
   hostname: Msg;
   cores: number;
   cpuPct: number;
+  cpuTempC: number | null;
   load: [number, number, number];
   memTotalMb: number;
   memUsedMb: number;

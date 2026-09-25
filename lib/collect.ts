@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import { getPlanUsage } from './anthropic-usage';
-import { childIndex, descendants, getHostCpuPct, readMemInfo, scanProcs, unitOfPid, type RawProc } from './procs';
+import { childIndex, descendants, getHostCpuPct, readCpuTempC, readMemInfo, scanProcs, unitOfPid, type RawProc } from './procs';
 import { collectSystemdJobs, infraMainPids, jobCommand, type SystemdJob } from './systemd-jobs';
 import { agentForPath, agentForText, withWorkspaces } from './workspaces';
 import {
@@ -1009,6 +1009,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       hostname: os.hostname(),
       cores: os.cpus().length,
       cpuPct: getHostCpuPct(),
+      cpuTempC: readCpuTempC(),
       load,
       uptimeSec: Math.round(os.uptime()),
       ...mem,
