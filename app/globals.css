@@ -70,6 +70,9 @@ button { font: inherit; color: inherit; }
 .kpi .k { font-size: 10.5px; letter-spacing: .7px; text-transform: uppercase; color: var(--txt-faint); }
 .kpi .v { font-size: 22px; font-weight: 620; margin-top: 3px; font-variant-numeric: tabular-nums; }
 .kpi .u { font-size: 11px; color: var(--txt-dim); margin-left: 4px; font-weight: 400; }
+.kpi .temp { float: right; color: var(--txt); }
+.kpi .temp.warm { color: var(--warn); }
+.kpi .temp.hot { color: var(--err); }
 .kpi .foot { font-size: 11px; color: var(--txt-faint); margin-top: 3px; font-family: var(--mono); }
 .kpi.alert { border-color: rgba(248,113,113,.4); }
 .kpi.alert .v { color: var(--err); }

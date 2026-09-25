@@ -934,6 +934,12 @@ function DashboardInner() {
           <div className="v">
             {h.cpuPct.toFixed(0)}
             <span className="u">%</span>
+            {h.cpuTempC != null ? (
+              <span className={`temp${h.cpuTempC >= 90 ? ' hot' : h.cpuTempC >= 80 ? ' warm' : ''}`}>
+                {h.cpuTempC.toFixed(0)}
+                <span className="u">°C</span>
+              </span>
+            ) : null}
           </div>
           <div className="meter">
             <i className={lvl(h.cpuPct)} style={{ width: `${h.cpuPct}%` }} />
