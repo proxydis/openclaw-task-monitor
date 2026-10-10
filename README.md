@@ -113,7 +113,7 @@ Every setting goes through environment variables.
 | `HOSTNAME` | `127.0.0.1` | listening interface |
 | `OPENCLAW_HOME` | `~/.openclaw` | root of the supervised install |
 | `MONITOR_REDACT` | — | `1` masks all business content (see below) |
-| `MONITOR_PLAN_USAGE` | — | `0` disables the Anthropic plan-usage card (no network call) |
+| `MONITOR_PLAN_USAGE` | — | `0` disables the Anthropic plan-usage card (no network call) and its *By model* tab (no transcript scan) |
 | `MONITOR_PLAN_TTL_MS` | `600000` | polling interval of the usage endpoint; the API grants about one call every 5 min, going lower gets the account rate-limited |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | where the Claude Code OAuth token is read from (read-only) |
 
