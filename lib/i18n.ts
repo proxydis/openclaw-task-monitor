@@ -109,6 +109,24 @@ const EN: Record<string, string> = {
   'plan.err.throttled': 'Anthropic is rate-limiting the usage endpoint — next attempt at {time}',
   'plan.err.http': 'Anthropic API error (HTTP {code})',
   'plan.err.network': 'Anthropic API unreachable ({err})',
+  'plan.tab.limits': 'Limits',
+  'plan.tab.models': 'By model',
+  'models.win.session': 'Session (5 h)',
+  'models.win.weekly': 'Week',
+  'models.metric.cost': 'Cost',
+  'models.metric.tokens': 'Tokens',
+  'models.chart': 'Share of consumption by model',
+  'models.since': 'Since {d}',
+  'models.rolling': 'Since {d} (rolling window)',
+  'models.total': 'total',
+  'models.calls': '{n} calls',
+  'models.empty': 'No Claude call in this window.',
+  'models.loading': 'Reading Claude transcripts…',
+  'models.catchup': 'Reading history ({n}%): figures are still partial',
+  'models.priceRef': 'Price estimated from {ref}',
+  'models.noPrice': 'Unknown price: excluded from cost',
+  'models.costNote': 'Public API price equivalent. The plan bills nothing per token, this only weighs each model.',
+  'models.tip': 'input {in} · output {out} · cache write {cw} · cache read {cr} · {calls} calls',
 
   // arbre
   'panel.tree': 'Agent tree',
@@ -211,6 +229,8 @@ const EN: Record<string, string> = {
   'fmt.memTip': '{v} of cumulative RSS',
   'fmt.tokK': '{v}k',
   'fmt.tokM': '{v}M',
+  'fmt.pct': '{v}%',
+  'fmt.pctTiny': '<{v}%',
 };
 
 const FR: Record<string, string> = {
@@ -303,6 +323,24 @@ const FR: Record<string, string> = {
   'plan.err.throttled': 'Anthropic limite les appels au relevé d’usage — prochaine tentative à {time}',
   'plan.err.http': 'Erreur API Anthropic (HTTP {code})',
   'plan.err.network': 'API Anthropic injoignable ({err})',
+  'plan.tab.limits': 'Limites',
+  'plan.tab.models': 'Par modèle',
+  'models.win.session': 'Session (5 h)',
+  'models.win.weekly': 'Semaine',
+  'models.metric.cost': 'Coût',
+  'models.metric.tokens': 'Jetons',
+  'models.chart': 'Répartition de la consommation par modèle',
+  'models.since': 'Depuis {d}',
+  'models.rolling': 'Depuis {d} (fenêtre glissante)',
+  'models.total': 'total',
+  'models.calls': '{n} appels',
+  'models.empty': 'Aucun appel Claude sur cette fenêtre.',
+  'models.loading': 'Lecture des transcripts Claude…',
+  'models.catchup': 'Lecture de l’historique ({n} %) : chiffres encore partiels',
+  'models.priceRef': 'Tarif estimé d’après {ref}',
+  'models.noPrice': 'Tarif inconnu : exclu du coût',
+  'models.costNote': 'Équivalent au tarif public de l’API. Le forfait ne facture rien au jeton, ce coût sert seulement à pondérer chaque modèle.',
+  'models.tip': 'entrée {in} · sortie {out} · écriture cache {cw} · lecture cache {cr} · {calls} appels',
 
   'panel.tree': 'Arbre des agents',
   'tab.tree': 'Arbre',
@@ -401,6 +439,8 @@ const FR: Record<string, string> = {
   'fmt.memTip': '{v} de RSS cumulé',
   'fmt.tokK': '{v}k',
   'fmt.tokM': '{v}M',
+  'fmt.pct': '{v} %',
+  'fmt.pctTiny': '< {v} %',
 };
 
 const DICT: Record<Lang, Record<string, string>> = { en: EN, fr: FR };

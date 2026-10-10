@@ -196,6 +196,43 @@ export type PlanUsage = {
   error: Msg | null;
 };
 
+/**
+ * Consommation d'un modèle sur une fenêtre, relevée dans les transcripts du CLI Claude.
+ * Les quatre compteurs de jetons sont disjoints : leur somme est le volume total traité.
+ */
+export type ModelShare = {
+  /** identifiant API sans suffixe de date (`claude-haiku-4-5`, pas `…-20251001`) */
+  model: string;
+  /** appels API, doublons retirés */
+  calls: number;
+  in: number;
+  out: number;
+  /** `cache_creation_input_tokens`, TTL 5 min et 1 h confondus */
+  cacheWrite: number;
+  cacheRead: number;
+  /** équivalent au tarif public de l'API, en USD ; `null` si le modèle n'a pas de tarif connu */
+  cost: number | null;
+  /** tarif emprunté à un modèle voisin (`claude-sonnet-5` pour `claude-sonnet-5-5`) */
+  priceRef?: string;
+};
+
+export type ModelUsageWindow = {
+  /** mêmes fenêtres que les limites `session` (5 h) et `weekly_all` (7 j) du forfait */
+  id: 'session' | 'weekly';
+  /** début de fenêtre, ms epoch */
+  since: number;
+  /** `true` si `since` est calé sur l'échéance rapportée par Anthropic, `false` si glissant */
+  aligned: boolean;
+  /** triés par coût décroissant */
+  models: ModelShare[];
+};
+
+export type ModelUsage = {
+  windows: ModelUsageWindow[];
+  /** part de l'historique déjà lue, 0–100 ; < 100 tant que le rattrapage du démarrage court */
+  readPct: number;
+};
+
 export type Snapshot = {
   ts: number;
   collectMs: number;
@@ -203,6 +240,8 @@ export type Snapshot = {
   gateway: GatewayInfo;
   /** `null` quand la carte est désactivée (MONITOR_PLAN_USAGE=0) */
   plan: PlanUsage | null;
+  /** répartition par modèle (onglet de la carte du forfait) ; `null` avec la carte */
+  modelUsage: ModelUsage | null;
   agents: AgentNode[];
   system: {
     browser: Res;

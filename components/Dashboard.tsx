@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AgentNode,
+  ModelShare,
+  ModelUsage,
   PlanLimit,
   PlanUsage,
   ProcInfo,
@@ -15,7 +17,7 @@ import type {
 } from '@/lib/types';
 import { agentStateLabel, stateLabel } from '@/lib/i18n';
 import { LangProvider, LangSwitch, useI18n } from './LangProvider';
-import { ago, agoRel, clock, dur, lvl, mb, mbShort, resetIn, tokens, tokensFull } from './format';
+import { ago, agoRel, clock, dur, lvl, mb, mbShort, resetIn, share, tokens, tokensFull, usd, weekdayTime } from './format';
 import CrabLogo from './CrabLogo';
 
 // ------------------------------------------------------------------ flux
@@ -150,9 +152,252 @@ function PlanRow({ limit, now }: { limit: PlanLimit; now: number }) {
   );
 }
 
-function PlanCard({ plan, refresh, busy }: { plan: PlanUsage; refresh: () => void; busy: boolean }) {
+/** Choix d'interface mémorisé d'une visite à l'autre (lu après le montage : pas d'écart SSR). */
+function usePersisted<T extends string>(key: string, initial: T, allowed: readonly T[]) {
+  const [v, setV] = useState<T>(initial);
+  useEffect(() => {
+    try {
+      const s = window.localStorage.getItem(key) as T | null;
+      if (s && allowed.includes(s)) setV(s);
+    } catch {
+      /* localStorage indisponible */
+    }
+    // `allowed` est une constante de module
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const set = useCallback(
+    (n: T) => {
+      setV(n);
+      try {
+        window.localStorage.setItem(key, n);
+      } catch {
+        /* noop */
+      }
+    },
+    [key],
+  );
+  return [v, set] as const;
+}
+
+const PLAN_TABS = ['limits', 'models'] as const;
+const MODEL_WINDOWS = ['session', 'weekly'] as const;
+const MODEL_METRICS = ['cost', 'tokens'] as const;
+type ModelMetric = (typeof MODEL_METRICS)[number];
+
+/**
+ * Palette catégorielle sombre (validée CVD et contraste ≥ 3:1 sur `--panel`). La couleur
+ * suit le modèle, jamais son rang : les modèles connus ont une case fixe, les autres
+ * prennent les cases libres par ordre alphabétique, au-delà de six tout passe en gris.
+ */
+const MODEL_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300'];
+const MODEL_OTHER = '#64748b';
+const KNOWN_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-fable-5-1'];
+
+function modelColors(models: Iterable<string>): Map<string, string> {
+  const out = new Map<string, string>();
+  const used = new Set<number>();
+  const rest: string[] = [];
+  for (const id of new Set(models)) {
+    const k = KNOWN_MODELS.indexOf(id);
+    if (k >= 0) {
+      out.set(id, MODEL_COLORS[k]);
+      used.add(k);
+    } else rest.push(id);
+  }
+  const free = MODEL_COLORS.map((_, i) => i).filter((i) => !used.has(i));
+  rest.sort().forEach((id, i) => out.set(id, i < free.length ? MODEL_COLORS[free[i]] : MODEL_OTHER));
+  return out;
+}
+
+/** `claude-haiku-4-5` → « Haiku 4.5 ». */
+function modelName(id: string): string {
+  const [family, ...ver] = id.replace(/^claude-/, '').split('-');
+  if (!family) return id;
+  return `${family[0].toUpperCase()}${family.slice(1)}${ver.length ? ` ${ver.join('.')}` : ''}`;
+}
+
+function shareTokens(s: ModelShare): number {
+  return s.in + s.out + s.cacheWrite + s.cacheRead;
+}
+
+function metricValue(s: ModelShare, metric: ModelMetric): number | null {
+  return metric === 'cost' ? s.cost : shareTokens(s);
+}
+
+/** Secteur d'anneau entre deux angles (radians, 0 = midi, sens horaire). */
+function arcPath(a0: number, a1: number, R: number, r: number, c: number): string {
+  const pt = (a: number, rad: number) => `${(c + rad * Math.sin(a)).toFixed(2)} ${(c - rad * Math.cos(a)).toFixed(2)}`;
+  const large = a1 - a0 > Math.PI ? 1 : 0;
+  return `M ${pt(a0, R)} A ${R} ${R} 0 ${large} 1 ${pt(a1, R)} L ${pt(a1, r)} A ${r} ${r} 0 ${large} 0 ${pt(a0, r)} Z`;
+}
+
+function ModelUsageView({ usage }: { usage: ModelUsage | null }) {
+  const { lang, t: tr } = useI18n();
+  const [winId, setWinId] = usePersisted('monitor.models.window', 'weekly', MODEL_WINDOWS);
+  const [metric, setMetric] = usePersisted<ModelMetric>('monitor.models.metric', 'cost', MODEL_METRICS);
+  const [hover, setHover] = useState<string | null>(null);
+
+  const colors = useMemo(
+    () => modelColors((usage?.windows ?? []).flatMap((w) => w.models.map((s) => s.model))),
+    [usage],
+  );
+  const win = usage?.windows.find((w) => w.id === winId) ?? null;
+  const rows = win?.models ?? [];
+  const total = rows.reduce((a, s) => a + (metricValue(s, metric) ?? 0), 0);
+  const fmt = (v: number | null) => (metric === 'cost' ? usd(lang, v) : tokens(lang, v));
+  const tip = (s: ModelShare) =>
+    tr('models.tip', {
+      in: tokensFull(lang, s.in),
+      out: tokensFull(lang, s.out),
+      cw: tokensFull(lang, s.cacheWrite),
+      cr: tokensFull(lang, s.cacheRead),
+      calls: tokensFull(lang, s.calls),
+    });
+
+  // secteurs : seuls les modèles chiffrables dans la métrique courante
+  const SIZE = 132;
+  const C = SIZE / 2;
+  const R = 62;
+  const r = 40;
+  let acc = 0;
+  const slices = rows
+    .map((s) => ({ s, v: metricValue(s, metric) ?? 0 }))
+    .filter((x) => x.v > 0)
+    .map(({ s, v }) => {
+      const a0 = (acc / total) * 2 * Math.PI;
+      acc += v;
+      return { s, ratio: v / total, a0, a1: (acc / total) * 2 * Math.PI };
+    });
+  const focus = hover ? rows.find((s) => s.model === hover) ?? null : null;
+  const focusV = focus ? metricValue(focus, metric) : null;
+
+  return (
+    <>
+      <div className="models-ctl">
+        <div className="seg" role="group" aria-label={tr('models.chart')}>
+          {MODEL_WINDOWS.map((w) => (
+            <button key={w} type="button" className={`tab${winId === w ? ' on' : ''}`} onClick={() => setWinId(w)}>
+              {tr(`models.win.${w}`)}
+            </button>
+          ))}
+        </div>
+        <div className="seg" role="group">
+          {MODEL_METRICS.map((k) => (
+            <button key={k} type="button" className={`tab${metric === k ? ' on' : ''}`} onClick={() => setMetric(k)}>
+              {tr(`models.metric.${k}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {usage && usage.readPct < 100 ? (
+        <div className="plan-note">
+          {usage.readPct === 0 ? tr('models.loading') : tr('models.catchup', { n: usage.readPct })}
+        </div>
+      ) : null}
+
+      {!slices.length ? (
+        usage && usage.readPct > 0 ? <div className="empty">{tr('models.empty')}</div> : null
+      ) : (
+        <div className="models">
+          <svg
+            className="donut"
+            width={SIZE}
+            height={SIZE}
+            viewBox={`0 0 ${SIZE} ${SIZE}`}
+            role="img"
+            aria-label={tr('models.chart')}
+            onMouseLeave={() => setHover(null)}
+          >
+            {slices.length === 1 ? (
+              <circle
+                cx={C}
+                cy={C}
+                r={(R + r) / 2}
+                fill="none"
+                stroke={colors.get(slices[0].s.model)}
+                strokeWidth={R - r}
+                onMouseEnter={() => setHover(slices[0].s.model)}
+              >
+                <title>{`${modelName(slices[0].s.model)} · ${share(lang, 1)}\n${tip(slices[0].s)}`}</title>
+              </circle>
+            ) : (
+              slices.map(({ s, ratio, a0, a1 }) => (
+                <path
+                  key={s.model}
+                  d={arcPath(a0, a1, R, r, C)}
+                  fill={colors.get(s.model)}
+                  className={hover && hover !== s.model ? 'dim' : undefined}
+                  onMouseEnter={() => setHover(s.model)}
+                >
+                  <title>{`${modelName(s.model)} · ${share(lang, ratio)}\n${tip(s)}`}</title>
+                </path>
+              ))
+            )}
+            <text x={C} y={C - 3} className="donut-v">
+              {focus ? (focusV != null && total ? share(lang, focusV / total) : '—') : fmt(total)}
+            </text>
+            <text x={C} y={C + 13} className="donut-k">
+              {focus ? modelName(focus.model) : tr('models.total')}
+            </text>
+          </svg>
+
+          <ul className="models-legend">
+            {rows.map((s) => {
+              const v = metricValue(s, metric);
+              const note = metric === 'cost' && v == null
+                ? tr('models.noPrice')
+                : metric === 'cost' && s.priceRef
+                  ? tr('models.priceRef', { ref: modelName(s.priceRef) })
+                  : null;
+              return (
+                <li
+                  key={s.model}
+                  className={hover && hover !== s.model ? 'dim' : undefined}
+                  onMouseEnter={() => setHover(s.model)}
+                  onMouseLeave={() => setHover(null)}
+                  title={`${note ? `${note}\n` : ''}${tip(s)}`}
+                >
+                  <i className="sw" style={{ background: colors.get(s.model) }} />
+                  <span className="nm">{modelName(s.model)}</span>
+                  <span className="pc">{v != null && total ? share(lang, v / total) : '—'}</span>
+                  <span className="vl">
+                    {note && v != null ? '≈ ' : ''}
+                    {fmt(v)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {win ? (
+        <div className="models-foot">
+          {tr(win.aligned ? 'models.since' : 'models.rolling', { d: weekdayTime(lang, win.since) })}
+          {' · '}
+          {tr('models.calls', { n: tokensFull(lang, rows.reduce((a, s) => a + s.calls, 0)) })}
+          {metric === 'cost' ? <div className="models-note">{tr('models.costNote')}</div> : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function PlanCard({
+  plan,
+  models,
+  refresh,
+  busy,
+}: {
+  plan: PlanUsage;
+  models: ModelUsage | null;
+  refresh: () => void;
+  busy: boolean;
+}) {
   const { lang, t: tr, m } = useI18n();
   const now = useNow(20_000);
+  const [tab, setTab] = usePersisted('monitor.plan.tab', 'limits', PLAN_TABS);
   const session = plan.limits.filter((l) => l.group === 'session');
   const weekly = plan.limits.filter((l) => l.group === 'weekly');
   const other = plan.limits.filter((l) => l.group === 'other');
@@ -164,39 +409,61 @@ function PlanCard({ plan, refresh, busy }: { plan: PlanUsage; refresh: () => voi
         <h2>{tr('plan.title')}</h2>
         {plan.planLabel ? <span className="plan-tier">{plan.planLabel}</span> : null}
       </header>
-      <div className="body">
-        {plan.error ? (
-          // un throttle est un état de fonctionnement normal, pas une panne : les jauges
-          // restent affichées, la note explique seulement pourquoi elles ne bougent plus.
-          <div className={throttled ? 'plan-note' : 'plan-err'}>{m(plan.error)}</div>
-        ) : null}
-        {!plan.limits.length && !plan.error ? (
-          <div className="empty">{plan.fetchedAt ? tr('plan.empty') : tr('plan.loading')}</div>
-        ) : null}
-        {session.map((l) => (
-          <PlanRow key={l.id} limit={l} now={now} />
-        ))}
-        {weekly.length ? <div className="section-t">{tr('plan.weekly')}</div> : null}
-        {weekly.map((l) => (
-          <PlanRow key={l.id} limit={l} now={now} />
-        ))}
-        {other.map((l) => (
-          <PlanRow key={l.id} limit={l} now={now} />
+      <div className="plan-tabs" role="tablist">
+        {PLAN_TABS.map((k) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={tab === k}
+            className={`tab${tab === k ? ' on' : ''}`}
+            onClick={() => setTab(k)}
+          >
+            {tr(`plan.tab.${k}`)}
+          </button>
         ))}
       </div>
-      <div className="plan-foot">
-        <span>{tr('plan.updated', { ago: agoRel(lang, plan.fetchedAt, now) })}</span>
-        <button
-          type="button"
-          className={`plan-refresh${busy ? ' busy' : ''}`}
-          title={tr('plan.refresh')}
-          aria-label={tr('plan.refresh')}
-          disabled={busy || throttled}
-          onClick={refresh}
-        >
-          ↻
-        </button>
-      </div>
+      {tab === 'models' ? (
+        <div className="body">
+          <ModelUsageView usage={models} />
+        </div>
+      ) : (
+        <>
+          <div className="body">
+            {plan.error ? (
+              // un throttle est un état de fonctionnement normal, pas une panne : les jauges
+              // restent affichées, la note explique seulement pourquoi elles ne bougent plus.
+              <div className={throttled ? 'plan-note' : 'plan-err'}>{m(plan.error)}</div>
+            ) : null}
+            {!plan.limits.length && !plan.error ? (
+              <div className="empty">{plan.fetchedAt ? tr('plan.empty') : tr('plan.loading')}</div>
+            ) : null}
+            {session.map((l) => (
+              <PlanRow key={l.id} limit={l} now={now} />
+            ))}
+            {weekly.length ? <div className="section-t">{tr('plan.weekly')}</div> : null}
+            {weekly.map((l) => (
+              <PlanRow key={l.id} limit={l} now={now} />
+            ))}
+            {other.map((l) => (
+              <PlanRow key={l.id} limit={l} now={now} />
+            ))}
+          </div>
+          <div className="plan-foot">
+            <span>{tr('plan.updated', { ago: agoRel(lang, plan.fetchedAt, now) })}</span>
+            <button
+              type="button"
+              className={`plan-refresh${busy ? ' busy' : ''}`}
+              title={tr('plan.refresh')}
+              aria-label={tr('plan.refresh')}
+              disabled={busy || throttled}
+              onClick={refresh}
+            >
+              ↻
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1111,7 +1378,9 @@ function DashboardInner() {
         </div>
 
         <div className="side">
-          {plan ? <PlanCard plan={plan} refresh={refreshPlan} busy={planBusy} /> : null}
+          {plan ? (
+            <PlanCard plan={plan} models={snap?.modelUsage ?? null} refresh={refreshPlan} busy={planBusy} />
+          ) : null}
           <Detail sel={sel} />
         </div>
       </div>

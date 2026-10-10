@@ -243,6 +243,42 @@ button { font: inherit; color: inherit; }
 .plan-refresh.busy { animation: spin .9s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
+/* onglets de la carte : une rangée sous l'en-tête, dont le titre occupe déjà la largeur */
+.plan-tabs { display: flex; gap: 4px; padding: 8px 14px 0; }
+
+/* ---------------- répartition par modèle ---------------- */
+.models-ctl { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.seg { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); }
+.seg .tab { padding: 3px 9px; font-size: 11.5px; border-radius: 6px; }
+
+.models { display: flex; align-items: center; gap: 14px; }
+.donut { flex: none; overflow: visible; }
+/* 2 px de fond entre secteurs : la frontière reste lisible sans dépendre de la couleur */
+.donut path { stroke: var(--panel); stroke-width: 2px; }
+.donut path, .donut circle { transition: opacity .15s ease; cursor: default; }
+.donut .dim { opacity: .3; }
+.donut-v { text-anchor: middle; fill: var(--txt); font-size: 15px; font-weight: 620; font-variant-numeric: tabular-nums; }
+.donut-k { text-anchor: middle; fill: var(--txt-faint); font-size: 10.5px; }
+
+.models-legend { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 0; display: grid; gap: 2px; }
+.models-legend li {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; grid-template-rows: auto auto;
+  column-gap: 7px; align-items: center; padding: 4px 6px; border-radius: 6px; cursor: default;
+  transition: opacity .15s ease;
+}
+.models-legend li:hover { background: var(--panel-2); }
+.models-legend li.dim { opacity: .45; }
+.models-legend .sw { width: 10px; height: 10px; border-radius: 3px; grid-row: 1 / span 2; }
+.models-legend .nm { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.models-legend .pc { font-family: var(--mono); font-size: 12px; color: var(--txt); font-variant-numeric: tabular-nums; text-align: right; }
+.models-legend .vl {
+  grid-column: 2 / span 2; font-family: var(--mono); font-size: 10.5px; color: var(--txt-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.models-foot { margin-top: 12px; font-size: 11px; color: var(--txt-faint); font-family: var(--mono); padding-bottom: 8px; }
+.models-note { margin-top: 4px; font-size: 10.5px; line-height: 1.4; font-family: ui-sans-serif, system-ui, sans-serif; }
+
 /* ---------------- détail ---------------- */
 .detail { position: sticky; top: 14px; }
 .detail .body { padding: 14px; }

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import { getPlanUsage } from './anthropic-usage';
+import { getModelUsage, scanModelUsage } from './model-usage';
 import { childIndex, descendants, getHostCpuPct, readCpuTempC, readMemInfo, scanProcs, unitOfPid, type RawProc } from './procs';
 import { collectSystemdJobs, infraMainPids, jobCommand, type SystemdJob } from './systemd-jobs';
 import { agentForPath, agentForText, withWorkspaces } from './workspaces';
@@ -606,6 +607,8 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   // index inverse + ouverture du budget de lecture des transcripts (colonnes IN/OUT/CACHE)
   const cliByKey = readCliSessionKeyIndex(agentsCfg.map((a) => a.id));
   beginTokenCycle();
+  // répartition par modèle : tous les transcripts de l'hôte, budget de lecture séparé
+  scanModelUsage();
   const runtimeProcs: RuntimeProc[] = [];
   for (const p of procs.values()) {
     const isRuntime =
@@ -1112,6 +1115,8 @@ export function collect(opts: { window?: number } = {}): Snapshot {
     walk(a.sessions);
   }
 
+  // accesseur synchrone : rend le dernier relevé connu, rafraîchit en arrière-plan
+  const plan = getPlanUsage();
   const snapshot: Snapshot = {
     ts: now,
     collectMs: Date.now() - t0,
@@ -1132,8 +1137,8 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       port: gatewayPort,
       version: null,
     },
-    // accesseur synchrone : rend le dernier relevé connu, rafraîchit en arrière-plan
-    plan: getPlanUsage(),
+    plan,
+    modelUsage: getModelUsage(plan),
     agents,
     system: {
       browser: res(browserPids, procs),
