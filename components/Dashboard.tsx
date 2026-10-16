@@ -638,14 +638,16 @@ function Row(props: {
         <span className="t">{title}</span>
         {subtitle ? <span className="s">{subtitle}</span> : null}
       </span>
-      {badges.map((b, i) => (
-        <span key={i} className={`badge ${b.cls ?? ''}`}>
-          {b.text}
-        </span>
-      ))}
-      <Tokens usage={usage ?? null} scope={usageScope} />
-      {res ? <Bars res={res} cores={cores} /> : <div className="metrics" />}
-      <span className="age">{age ? ago(lang, age) : ''}</span>
+      <span className="cells">
+        {badges.map((b, i) => (
+          <span key={i} className={`badge ${b.cls ?? ''}`}>
+            {b.text}
+          </span>
+        ))}
+        <Tokens usage={usage ?? null} scope={usageScope} />
+        {res ? <Bars res={res} cores={cores} /> : <div className="metrics" />}
+        <span className="age">{age ? ago(lang, age) : ''}</span>
+      </span>
     </div>
   );
 }
