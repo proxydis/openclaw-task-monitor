@@ -8,7 +8,7 @@
  * utile à surveiller. Ce module lit ces unités directement chez systemd et les rattache
  * à leur agent.
  */
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { agentForText, withWorkspaces, type WorkspaceAgent } from './workspaces';
@@ -25,6 +25,8 @@ export type SystemdJob = {
   startedAt: number | null;
   endedAt: number | null;
   pids: number[];
+  /** journal du job quand il est connu (`--log` d'`openclaw-job-done`, ou `StandardOutput=append:`) */
+  logFile: string | null;
 };
 
 export type JobAgent = WorkspaceAgent;
@@ -49,6 +51,8 @@ const PROPS = [
   'InactiveEnterTimestamp',
   'ControlGroup',
   'ExecStart',
+  'ExecStopPost',
+  'StandardOutput',
 ].join(',');
 
 function sh(args: string[], timeout = 3000): string {
@@ -62,6 +66,17 @@ function sh(args: string[], timeout = 3000): string {
   } catch {
     return '';
   }
+}
+
+function shAsync(args: string[], timeout = 3000): Promise<string> {
+  return new Promise((resolve) => {
+    execFile(
+      SYSTEMCTL,
+      args,
+      { encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024 },
+      (err, stdout) => resolve(err ? '' : String(stdout)),
+    );
+  });
 }
 
 const STAMP = /(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})/;
@@ -136,12 +151,20 @@ function parseUnitBlock(block: string, agents: JobAgent[]): SystemdJob | null {
     startedAt: parseStamp(kv.ExecMainStartTimestamp) ?? parseStamp(kv.ActiveEnterTimestamp),
     endedAt: parseStamp(kv.ExecMainExitTimestamp) ?? parseStamp(kv.InactiveEnterTimestamp),
     pids: cgroupPids(kv.ControlGroup),
+    logFile: logFileOf(kv.ExecStopPost, kv.StandardOutput),
   };
 }
 
+/** Journal d'un job : l'option `--log <chemin>` de l'ExecStopPost, sinon `StandardOutput=append:|file:|truncate:`. */
+function logFileOf(execStopPost: string | undefined, stdout: string | undefined): string | null {
+  const m = /--log\s+(\/[^\s;]+)/.exec(execStopPost ?? '');
+  if (m) return m[1];
+  const o = /^(?:append|file|truncate):(\/.+)$/.exec(stdout ?? '');
+  return o ? o[1] : null;
+}
+
 /** Unités `--user` candidates : nom ou description rattachable à un agent, hors infrastructure. */
-function candidateUnits(agents: JobAgent[]): string[] {
-  const raw = sh(['--user', 'list-units', '--type=service', '--all', '--output=json'], 2500);
+function candidateUnits(agents: JobAgent[], raw: string): string[] {
   if (!raw.trim()) return [];
   let units: Array<{ unit?: string; description?: string }>;
   try {
@@ -167,11 +190,25 @@ function candidateUnits(agents: JobAgent[]): string[] {
 export function collectSystemdJobs(rawAgents: JobAgent[], ocHome: string): SystemdJob[] {
   if (!rawAgents.length) return [];
   const agents = withWorkspaces(rawAgents, ocHome);
-  const candidates = candidateUnits(agents);
+  const candidates = candidateUnits(agents, sh(LIST_ARGS, 2500));
   if (!candidates.length) return [];
-  const shown = sh(['--user', 'show', ...candidates, `--property=${PROPS}`], 4000);
-  if (!shown.trim()) return [];
+  return parseShown(sh(showArgs(candidates), 4000), agents);
+}
 
+/** Même lecture, sans bloquer la boucle d'événements (route `/api/work`). */
+export async function collectSystemdJobsAsync(rawAgents: JobAgent[], ocHome: string): Promise<SystemdJob[]> {
+  if (!rawAgents.length) return [];
+  const agents = withWorkspaces(rawAgents, ocHome);
+  const candidates = candidateUnits(agents, await shAsync(LIST_ARGS, 2500));
+  if (!candidates.length) return [];
+  return parseShown(await shAsync(showArgs(candidates), 4000), agents);
+}
+
+const LIST_ARGS = ['--user', 'list-units', '--type=service', '--all', '--output=json'];
+const showArgs = (units: string[]) => ['--user', 'show', ...units, `--property=${PROPS}`];
+
+function parseShown(shown: string, agents: JobAgent[]): SystemdJob[] {
+  if (!shown.trim()) return [];
   const jobs: SystemdJob[] = [];
   for (const block of shown.split(/\n\s*\n/)) {
     if (!block.trim()) continue;
