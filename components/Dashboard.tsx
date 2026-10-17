@@ -19,6 +19,7 @@ import { agentStateLabel, stateLabel } from '@/lib/i18n';
 import { LangProvider, LangSwitch, useI18n } from './LangProvider';
 import { ago, agoRel, clock, dur, lvl, mb, mbShort, resetIn, share, tokens, tokensFull, usd, weekdayTime } from './format';
 import CrabLogo from './CrabLogo';
+import WorkTab from './WorkTab';
 
 // ------------------------------------------------------------------ flux
 
@@ -1056,7 +1057,7 @@ function DashboardInner() {
   const [expandAll, setExpandAll] = useState(false);
   const openRef = useRef(open);
   const [selRef, setSelRef] = useState<SelRef | null>(null);
-  const [tab, setTab] = useState<'tree' | 'procs'>('tree');
+  const [tab, setTab] = useState<'tree' | 'procs' | 'work'>('tree');
   const [q, setQ] = useState('');
   const [runningOnly, setRunningOnly] = useState(false);
   const [showIdle, setShowIdle] = useState(true);
@@ -1277,6 +1278,9 @@ function DashboardInner() {
               <button className={`tab${tab === 'procs' ? ' on' : ''}`} onClick={() => setTab('procs')}>
                 {tr('tab.procs', { n: snap.procs.length })}
               </button>
+              <button className={`tab${tab === 'work' ? ' on' : ''}`} onClick={() => setTab('work')}>
+                {tr('tab.work')}
+              </button>
             </div>
             {tab === 'tree' ? (
               <button
@@ -1291,6 +1295,8 @@ function DashboardInner() {
                 {expanded ? '⊟' : '⊞'}
               </button>
             ) : null}
+            {tab !== 'work' ? (
+              <>
             <input className="search" placeholder={tr('ui.filter')} value={q} onChange={(e) => setQ(e.target.value)} />
             <label className="toggle">
               <input type="checkbox" checked={runningOnly} onChange={(e) => setRunningOnly(e.target.checked)} />
@@ -1314,9 +1320,13 @@ function DashboardInner() {
               />
               {tr('toggle.done')}
             </label>
+              </>
+            ) : null}
           </header>
 
-          {tab === 'procs' ? (
+          {tab === 'work' ? (
+            <WorkTab />
+          ) : tab === 'procs' ? (
             <Procs procs={snap.procs} />
           ) : (
             <div className="body">
@@ -1376,7 +1386,7 @@ function DashboardInner() {
             </div>
           )}
 
-          <Legend />
+          {tab !== 'work' ? <Legend /> : null}
         </div>
 
         <div className="side">
