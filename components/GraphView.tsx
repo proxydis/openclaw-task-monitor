@@ -77,6 +77,8 @@ const KIND_RANK: Record<GraphNode['kind'], number> = {
   systemd: 4,
   detached: 5,
   cron: 6,
+  lane: 10,
+  pass: 11,
   browser: 7,
   service: 8,
   other: 9,
@@ -105,6 +107,8 @@ function layout(nodes: GraphNode[]): { placed: Map<string, Placed>; edges: Edge[
         Number(a.id.startsWith('cluster:')) - Number(b.id.startsWith('cluster:')) ||
         KIND_RANK[a.kind] - KIND_RANK[b.kind] ||
         (a.kind === 'agent' || a.kind === 'service' ? String(a.label).localeCompare(String(b.label)) : 0) ||
+        // les voies gardent leur ordre A, B quel que soit le moment où chaque passe a démarré
+        (a.kind === 'lane' && b.kind === 'lane' ? a.id.localeCompare(b.id) : 0) ||
         (a.startedAt ?? 0) - (b.startedAt ?? 0) ||
         a.id.localeCompare(b.id),
     );

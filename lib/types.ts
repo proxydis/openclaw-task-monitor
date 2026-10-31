@@ -273,6 +273,8 @@ export type GraphKind =
   | 'systemd'
   | 'detached'
   | 'cron'
+  | 'lane'
+  | 'pass'
   | 'service'
   | 'browser'
   | 'other';
