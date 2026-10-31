@@ -87,6 +87,15 @@ export type TaskNode = {
   res: Res;
   /** `null` quand la tâche n'est adossée à aucune session CLI (cron, job systemd) */
   usage: TokenUsage | null;
+  /**
+   * Portée de `usage`, quand elle n'est pas celle de la ligne parente. `'turn'` marque
+   * le tour en cours : sa consommation est bornée à l'ouverture du tour, donc plus
+   * petite que celle de sa session — l'interface le dit plutôt que de laisser lire deux
+   * chiffres différents sur deux lignes voisines comme une incohérence.
+   */
+  usageScope?: 'turn';
+  /** process rattachés à un job (systemd, détaché) ; absent des autres tâches */
+  pids?: number[];
   children: TaskNode[];
 };
 
@@ -137,6 +146,7 @@ export type HostInfo = {
   hostname: Msg;
   cores: number;
   cpuPct: number;
+  cpuTempC: number | null;
   load: [number, number, number];
   memTotalMb: number;
   memUsedMb: number;
@@ -188,13 +198,54 @@ export type PlanUsage = {
   error: Msg | null;
 };
 
+/**
+ * Consommation d'un modèle sur une fenêtre, relevée dans les transcripts du CLI Claude.
+ * Les quatre compteurs de jetons sont disjoints : leur somme est le volume total traité.
+ */
+export type ModelShare = {
+  /** identifiant API sans suffixe de date (`claude-haiku-4-5`, pas `…-20251001`) */
+  model: string;
+  /** appels API, doublons retirés */
+  calls: number;
+  in: number;
+  out: number;
+  /** `cache_creation_input_tokens`, TTL 5 min et 1 h confondus */
+  cacheWrite: number;
+  cacheRead: number;
+  /** équivalent au tarif public de l'API, en USD ; `null` si le modèle n'a pas de tarif connu */
+  cost: number | null;
+  /** tarif emprunté à un modèle voisin (`claude-sonnet-5` pour `claude-sonnet-5-5`) */
+  priceRef?: string;
+};
+
+export type ModelUsageWindow = {
+  /** mêmes fenêtres que les limites `session` (5 h) et `weekly_all` (7 j) du forfait */
+  id: 'session' | 'weekly';
+  /** début de fenêtre, ms epoch */
+  since: number;
+  /** `true` si `since` est calé sur l'échéance rapportée par Anthropic, `false` si glissant */
+  aligned: boolean;
+  /** triés par coût décroissant */
+  models: ModelShare[];
+};
+
+export type ModelUsage = {
+  windows: ModelUsageWindow[];
+  /** part de l'historique déjà lue, 0–100 ; < 100 tant que le rattrapage du démarrage court */
+  readPct: number;
+};
+
 export type Snapshot = {
+  /** identifiant du build du serveur (cf. `next.config.mjs`) ; le client recharge s'il diffère du sien */
+  build: string | null;
   ts: number;
   collectMs: number;
   host: HostInfo;
   gateway: GatewayInfo;
   /** `null` quand la carte est désactivée (MONITOR_PLAN_USAGE=0) */
   plan: PlanUsage | null;
+  /** répartition par modèle (onglet de la carte du forfait) ; `null` avec la carte */
+  modelUsage: ModelUsage | null;
   agents: AgentNode[];
   system: {
     browser: Res;
@@ -209,4 +260,75 @@ export type Snapshot = {
   };
   procs: ProcInfo[];
   warnings: Msg[];
+};
+
+// ------------------------------------------------------------------ vue Graph
+
+/** Rôle affiché dans le panneau : agent, sous-agent, job séparé, ou infrastructure OpenClaw. */
+export type GraphRole = 'infra' | 'agent' | 'subagent' | 'job';
+
+export type GraphKind =
+  | 'gateway'
+  | 'agent'
+  | 'session'
+  | 'subagent'
+  | 'lane'
+  | 'systemd'
+  | 'detached'
+  | 'cron'
+  | 'service'
+  | 'browser'
+  | 'other';
+
+export type GraphProc = {
+  pid: number;
+  ppid: number;
+  comm: string;
+  cmd: string;
+  cpuPct: number;
+  rssMb: number;
+  startedAt: number;
+};
+
+/** Ce que fait l'unité : un prompt (agent), une commande (process), un job (systemd, cron). */
+export type GraphActivity = { type: 'prompt' | 'command' | 'job' | 'none'; text: Msg | null };
+
+export type GraphNode = {
+  id: string;
+  /** `null` pour la racine (la gateway) */
+  parent: string | null;
+  role: GraphRole;
+  kind: GraphKind;
+  label: Msg;
+  sub: Msg | null;
+  state: UnitState;
+  startedAt: number | null;
+  endedAt: number | null;
+  model: string | null;
+  /** niveau d'effort (`--effort` du CLI), `null` quand aucun process ne le porte */
+  effort: string | null;
+  /** d'où vient l'effort : drapeau du process (`cli`), dernier connu, configuration, défaut du CLI */
+  effortSrc?: 'cli' | 'last' | 'config' | 'default' | null;
+  activity: GraphActivity;
+  /** jetons depuis la création de la session ; `null` : rien de mesurable (tiret, pas zéro) */
+  usage: TokenUsage | null;
+  /** jetons du tour en cours, quand il existe */
+  turnUsage: TokenUsage | null;
+  res: Res;
+  /** tous les process de l'unité, sans filtre de seuil CPU/RAM */
+  procs: GraphProc[];
+  /** couples (clé de catalogue, valeur brute) : canal, clé de session, unité, répertoire… */
+  facts: { k: string; v: string }[];
+  /** résumé ou erreur de l'unité */
+  note: Msg | null;
+  noteIsError: boolean;
+};
+
+export type GraphData = {
+  ts: number;
+  nodes: GraphNode[];
+  /** process OpenClaw distincts présents dans le graphe */
+  procCount: number;
+  /** `true` si le graphe contient aussi les unités inactives ou terminées récentes */
+  inactive: boolean;
 };

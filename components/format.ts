@@ -104,6 +104,42 @@ export function tokensFull(lang: Lang, v: number | null | undefined): string {
   return nf(lang, 0).format(v);
 }
 
+const USD = new Map<string, Intl.NumberFormat>();
+
+/** Montant en dollars : sans décimale à partir de 100 $, au cent en dessous. */
+export function usd(lang: Lang, v: number | null | undefined): string {
+  if (v == null) return '—';
+  const digits = v >= 100 ? 0 : 2;
+  const key = `${lang}:${digits}`;
+  let f = USD.get(key);
+  if (!f) {
+    f = new Intl.NumberFormat(locale(lang), {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: digits,
+      maximumFractionDigits: digits,
+    });
+    USD.set(key, f);
+  }
+  return f.format(v);
+}
+
+/** Part en pourcentage : une décimale sous 10 %, « < 0,1 % » pour une part non nulle infime. */
+export function share(lang: Lang, ratio: number): string {
+  const p = ratio * 100;
+  if (p > 0 && p < 0.1) return t(lang, 'fmt.pctTiny', { v: nf(lang, 1).format(0.1) });
+  return t(lang, 'fmt.pct', { v: nf(lang, p < 10 ? 1 : 0).format(p) });
+}
+
+/** Début d'une fenêtre de consommation : « sam. 07:00 », tronqué à la minute. */
+export function weekdayTime(lang: Lang, ts: number): string {
+  return new Date(Math.floor(ts / 60_000) * 60_000).toLocaleString(locale(lang), {
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export function lvl(pct: number): 'ok' | 'warn' | 'err' {
   if (pct >= 90) return 'err';
   if (pct >= 70) return 'warn';
