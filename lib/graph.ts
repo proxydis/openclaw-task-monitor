@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { claudeProjectsDir } from './claude-cli';
+import { splitJob, type Pass } from './lanes';
 import { unitOfPid, type RawProc } from './procs';
 import { OC_HOME, REDACT } from './store';
 import { readSessionTokens, sumTokens } from './token-usage';
@@ -164,6 +165,33 @@ function resolveEfforts(nodes: GraphNode[]): void {
 }
 
 const CMD_MAX = 320;
+
+/** Heure de lancement du plus ancien process d'une voie, quand elle n'a pas de passe en cours. */
+function lanes0Start(pids: number[], procs: Map<number, RawProc>): number | null {
+  let min: number | null = null;
+  for (const pid of pids) {
+    const p = procs.get(pid);
+    if (p && (min === null || p.startedAt < min)) min = p.startedAt;
+  }
+  return min;
+}
+
+/** Début d'un fichier texte (prompt d'une passe) ; `null` si illisible. */
+function readHead(file: string, max: number): string | null {
+  try {
+    const fd = fs.openSync(file, 'r');
+    try {
+      const buf = Buffer.alloc(max);
+      const n = fs.readSync(fd, buf, 0, max, 0);
+      const size = fs.fstatSync(fd).size;
+      return buf.toString('utf8', 0, n) + (size > max ? `\n\n[… ${size - max} more bytes]` : '');
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------- jetons d'un job
 
@@ -355,34 +383,106 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     const det = t.id.startsWith('detached:');
     const kind: GraphKind = sysd ? 'systemd' : det ? 'detached' : 'cron';
     const live = t.state === 'running';
-    const list = procsOf(t.pids ?? []);
-    const claude = list.find((p) => /(^|\/)claude(\s|$)/.test(p.cmd.split(' --')[0] ?? ''));
+    const all = procsOf(t.pids ?? []);
+    // voies parallèles et passes `claude` : chacune devient un nœud sous le job, qui garde le reste
+    const split = live ? splitJob(t.pids ?? [], procs) : { lanes: [], passes: [], rest: [] as number[] };
+    const hasSplit = split.lanes.length > 0 || split.passes.length > 0;
+    const restSet = new Set(split.rest);
+    const list = hasSplit ? all.filter((p) => restSet.has(p.pid)) : all;
+    const claudeCmd =
+      split.lanes.find((l) => l.pass)?.pass?.cmd ??
+      split.passes[0]?.cmd ??
+      list.find((p) => /(^|\/)claude(\s|$)/.test(p.cmd.split(' --')[0] ?? ''))?.cmd ??
+      null;
     const facts: GraphNode['facts'] = [];
     if (sysd) facts.push({ k: 'graph.f.unit', v: t.id.slice('systemd:'.length) });
     if (det) facts.push({ k: 'graph.f.pid', v: t.id.slice('detached:'.length) });
     if (t.kind === 'cron') facts.push({ k: 'graph.f.schedule', v: '' });
-    push({
+    const jobId = push({
       id: `j:${t.id}`,
       parent: `a:${agent.id}`,
       role: 'job',
       kind,
       label: t.title,
-      sub: t.runtime,
+      sub: split.lanes.length ? { k: 'graph.job.lanes', p: { n: split.lanes.length } } : t.runtime,
       state: t.state,
       startedAt: t.startedAt ?? t.createdAt,
       endedAt: t.endedAt,
-      model: claude ? modelOfCmd(claude.cmd) : null,
-      effort: claude ? (effortOfCmd(claude.cmd) ?? 'default') : null,
-      effortSrc: claude && !effortOfCmd(claude.cmd) ? 'default' : undefined,
+      model: claudeCmd ? modelOfCmd(claudeCmd) : null,
+      effort: claudeCmd ? (effortOfCmd(claudeCmd) ?? 'default') : null,
+      effortSrc: claudeCmd && !effortOfCmd(claudeCmd) ? 'default' : undefined,
       activity: activityOfTask(t, kind === 'cron' ? 'job' : 'command'),
       usage: live ? jobTokens(t.pids ?? [], procs, now) : null,
       turnUsage: null,
-      res: live ? resOf(list) : ZERO_RES,
+      res: live ? resOf(all) : ZERO_RES,
       procs: list,
       facts: facts.filter((f) => f.v !== ''),
       note: t.error ?? t.summary,
       noteIsError: !!t.error,
     });
+
+    const passNode = (
+      id: string,
+      label: Msg,
+      sub: Msg | null,
+      pass: Pass | null,
+      pids: number[],
+      lane: boolean,
+      port: string | null,
+    ): void => {
+      const mine = all.filter((p) => pids.includes(p.pid));
+      const running = !!pass;
+      const f: GraphNode['facts'] = [];
+      if (pass?.step) f.push({ k: 'graph.f.step', v: pass.step });
+      if (pass?.branch) f.push({ k: 'graph.f.branch', v: pass.branch });
+      if (pass?.cwd) f.push({ k: 'graph.f.dir', v: pass.cwd });
+      if (pass?.promptFile) f.push({ k: 'graph.f.promptFile', v: pass.promptFile });
+      if (pass?.logFile) f.push({ k: 'graph.f.logFile', v: pass.logFile });
+      if (pass) f.push({ k: 'graph.f.pid', v: String(pass.pid) });
+      if (port) f.push({ k: 'graph.f.e2ePort', v: port });
+      push({
+        id,
+        parent: jobId,
+        role: 'subagent',
+        kind: lane ? 'lane' : 'pass',
+        label,
+        sub,
+        // une voie vivante est « en cours » même entre deux passes : sinon, le filtre « en cours seulement »
+        // la ferait disparaître pendant qu'elle attend un créneau — précisément ce qu'on veut voir
+        state: lane || running ? 'running' : 'paused',
+        startedAt: pass?.startedAt ?? (lane ? lanes0Start(pids, procs) : null),
+        endedAt: null,
+        model: pass ? modelOfCmd(pass.cmd) : null,
+        effort: pass ? (effortOfCmd(pass.cmd) ?? 'default') : null,
+        effortSrc: pass && !effortOfCmd(pass.cmd) ? 'default' : undefined,
+        activity: pass?.promptFile
+          ? { type: 'prompt', text: REDACT ? { k: 'redact.content' } : readHead(pass.promptFile, 6000) }
+          : NONE,
+        usage: pass ? jobTokens([pass.pid], procs, now) : null,
+        turnUsage: null,
+        res: resOf(mine),
+        procs: mine,
+        facts: f,
+        note: running ? null : { k: 'graph.lane.waiting' },
+        noteIsError: false,
+      });
+    };
+    for (const l of split.lanes) {
+      const sub = l.pass ? [l.pass.step, l.pass.branch].filter(Boolean).join(' · ') : '';
+      passNode(
+        `l:${jobId}:${l.letter === '?' ? l.root : l.letter}`,
+        { k: 'graph.lane', p: { id: l.letter } },
+        sub || { k: 'graph.lane.waitingSub' },
+        l.pass,
+        l.pids,
+        true,
+        l.letter === 'A' ? '3123' : l.letter === 'B' ? '3124' : null,
+      );
+    }
+    for (const ps of split.passes) {
+      const sub = [ps.branch, ps.cwd ? path.basename(ps.cwd) : null].filter(Boolean).join(' · ');
+      passNode(`p:${jobId}:${ps.pid}`, ps.step ?? { k: 'graph.pass' }, sub || null, ps, [ps.pid], false, null);
+    }
   };
 
   const sessionNode = (s: SessionNode, agent: AgentNode, parentId: string): void => {
