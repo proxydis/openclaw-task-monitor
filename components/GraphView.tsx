@@ -192,6 +192,8 @@ function collapse(
       endedAt: null,
       model: null,
       effort: null,
+      effortSource: null,
+      effortAt: null,
       usage: null,
       turnUsage: null,
       procs: [],
@@ -269,7 +271,9 @@ function Card({
   const { lang, t, m } = useI18n();
   const n = p.n;
   const title = cardTitle(n.kind === 'agent' ? String(n.label) : m(n.label));
-  const modelBits = [n.model ? n.model.split('/').pop() : null, n.effort].filter(Boolean).join(' · ');
+  // un effort qui n'est pas un relevé direct porte un « ◦ » : la source est dans le panneau
+  const effortText = n.effort ? `${n.effort}${n.effortSource === 'last' || n.effortSource === 'agentLast' || n.effortSource === 'config' ? ' ◦' : ''}` : null;
+  const modelBits = [n.model ? n.model.split('/').pop() : null, effortText].filter(Boolean).join(' · ');
   const sub = modelBits || (n.sub ? m(n.sub) : '');
   const tok = totalTokens(n.turnUsage ?? n.usage);
   const tokMark = (n.turnUsage ?? n.usage)?.approx ? '~' : '';
@@ -695,7 +699,10 @@ export function GraphDetail({
           <dt>{t('f.model')}</dt>
           <dd>{node.model ?? '—'}</dd>
           <dt>{t('graph.f.effort')}</dt>
-          <dd>{node.effort ?? '—'}</dd>
+          <dd title={effortNote(node, t, lang, now)}>
+            {node.effort ?? '—'}
+            <span className="gv-eff-src">{effortNote(node, t, lang, now)}</span>
+          </dd>
           {lineage.length ? (
             <>
               <dt>{t('graph.f.launchedBy')}</dt>
@@ -758,6 +765,31 @@ export function GraphDetail({
       </div>
     </div>
   );
+}
+
+/** Provenance d'un niveau d'effort : vide pour un relevé direct, explicite pour tout repli. */
+function effortNote(
+  n: GraphNode,
+  t: (k: string, p?: Record<string, string | number>) => string,
+  lang: Parameters<typeof ago>[0],
+  now: number,
+): string {
+  switch (n.effortSource) {
+    case 'live':
+      return '';
+    case 'adaptive':
+      return t('graph.eff.adaptive');
+    case 'default':
+      return t('graph.eff.default');
+    case 'last':
+      return t('graph.eff.last', { d: ago(lang, n.effortAt, now) });
+    case 'agentLast':
+      return t('graph.eff.agentLast', { d: ago(lang, n.effortAt, now) });
+    case 'config':
+      return t('graph.eff.config');
+    default:
+      return t(n.role === 'infra' || n.kind !== 'session' && n.kind !== 'subagent' && n.kind !== 'agent' ? 'graph.eff.na' : 'graph.eff.none');
+  }
 }
 
 function clipTitle(n: GraphNode, m: (x: GraphNode['label']) => string): string {

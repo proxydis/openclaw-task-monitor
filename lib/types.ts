@@ -304,6 +304,10 @@ export type GraphNode = {
   model: string | null;
   /** niveau d'effort (`--effort` du CLI), `null` quand aucun process ne le porte */
   effort: string | null;
+  /** d'où vient `effort` : relevé direct, repli étiqueté (dernière valeur vue, config…) ; `null` sans effort */
+  effortSource: 'live' | 'adaptive' | 'default' | 'last' | 'agentLast' | 'config' | null;
+  /** date du relevé quand la valeur est la dernière vue ; `null` sinon */
+  effortAt: number | null;
   activity: GraphActivity;
   /** jetons depuis la création de la session ; `null` : rien de mesurable (tiret, pas zéro) */
   usage: TokenUsage | null;
