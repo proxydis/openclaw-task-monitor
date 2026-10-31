@@ -271,7 +271,8 @@ function Card({
   const n = p.n;
   const title = cardTitle(n.kind === 'agent' ? String(n.label) : m(n.label));
   const modelBits = [n.model ? n.model.split('/').pop() : null, n.effort ? (n.effortSrc && n.effortSrc !== 'cli' ? `${n.effort}*` : n.effort) : null].filter(Boolean).join(' · ');
-  const sub = modelBits || (n.sub ? m(n.sub) : '');
+  // une voie montre son étape plutôt que son effort : c'est ce qui la distingue de sa voisine
+  const sub = n.kind === 'lane' ? (n.sub ? m(n.sub) : '') || modelBits : modelBits || (n.sub ? m(n.sub) : '');
   const tok = totalTokens(n.turnUsage ?? n.usage);
   const tokMark = (n.turnUsage ?? n.usage)?.approx ? '~' : '';
   return (
@@ -294,7 +295,7 @@ function Card({
         {t(ROLE_KEY[n.role])}
       </text>
       <text className="gv-sub" x={16} y={46}>
-        {clip(sub, 38)}
+        {clip(sub, 40)}
       </text>
       <line className="gv-sep" x1={16} x2={CARD_W - 16} y1={56} y2={56} />
       <text className="gv-meta" x={16} y={73}>
@@ -772,7 +773,15 @@ function FactRow({ k, v }: { k: string; v: string }) {
   return (
     <>
       <dt>{t(k)}</dt>
-      <dd>{v}</dd>
+      <dd>
+        {/^https:\/\/trello\.com\//.test(v) ? (
+          <a href={v} target="_blank" rel="noreferrer noopener">
+            {v.replace('https://', '')}
+          </a>
+        ) : (
+          v
+        )}
+      </dd>
     </>
   );
 }

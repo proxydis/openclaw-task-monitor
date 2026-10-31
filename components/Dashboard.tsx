@@ -24,6 +24,24 @@ import { GraphDetail, GraphView, useGraph } from './GraphView';
 
 // ------------------------------------------------------------------ flux
 
+/**
+ * Recharge la page quand le serveur a été redéployé sous un onglet resté ouvert : l'ancien
+ * bundle ne connaît ni les nouvelles clés de traduction ni les nouveaux champs. Un seul
+ * rechargement par minute au plus, pour qu'un identifiant illisible ne boucle jamais.
+ */
+function reloadIfStale(serverBuild: string | null | undefined): void {
+  const mine = process.env.NEXT_PUBLIC_BUILD_ID;
+  if (!serverBuild || !mine || serverBuild === mine) return;
+  try {
+    const last = Number(window.sessionStorage.getItem('monitor.reload') ?? 0);
+    if (Date.now() - last < 60_000) return;
+    window.sessionStorage.setItem('monitor.reload', String(Date.now()));
+  } catch {
+    /* sessionStorage indisponible : un rechargement unique par cycle de vie suffit */
+  }
+  window.location.reload();
+}
+
 function useSnapshot() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [live, setLive] = useState(false);
@@ -40,6 +58,7 @@ function useSnapshot() {
         try {
           const r = await fetch('/api/state', { cache: 'no-store' });
           const j = await r.json();
+          reloadIfStale(j.build);
           if (!stopped) {
             setSnap(j);
             setLive(true);
@@ -62,7 +81,9 @@ function useSnapshot() {
       es.onmessage = (ev) => {
         if (stopped) return;
         try {
-          setSnap(JSON.parse(ev.data));
+          const next = JSON.parse(ev.data) as Snapshot;
+          reloadIfStale(next.build);
+          setSnap(next);
           setLive(true);
           setErr(null);
         } catch {

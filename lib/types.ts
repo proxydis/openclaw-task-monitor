@@ -236,6 +236,8 @@ export type ModelUsage = {
 };
 
 export type Snapshot = {
+  /** identifiant du build du serveur (cf. `next.config.mjs`) ; le client recharge s'il diffère du sien */
+  build: string | null;
   ts: number;
   collectMs: number;
   host: HostInfo;

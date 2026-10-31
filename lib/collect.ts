@@ -1158,6 +1158,7 @@ export function collectAll(opts: { window?: number } = {}): { snapshot: Snapshot
   // accesseur synchrone : rend le dernier relevé connu, rafraîchit en arrière-plan
   const plan = getPlanUsage();
   const snapshot: Snapshot = {
+    build: process.env.NEXT_PUBLIC_BUILD_ID ?? null,
     ts: now,
     collectMs: Date.now() - t0,
     host: {
