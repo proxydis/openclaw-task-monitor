@@ -226,17 +226,33 @@ const WINDOW_SPAWN_SKEW_MS = 120_000;
 /**
  * Session d'un process CLI que sa ligne de commande n'a pas suffi à identifier.
  *
- * On retient le tour ouvert le plus récent qui n'a pas démarré *après* le process, hors
- * tours déjà réclamés. C'est le filet qui manquait : `session_nodes.cliSessionIds`, seul
+ * On retient, parmi les fenêtres ouvertes non réclamées et actives depuis le lancement du
+ * process, celle qui s'est ouverte au même moment (session neuve) ou, à défaut, la plus
+ * récemment active (session reprise). C'est le filet qui manquait : `session_nodes.cliSessionIds`, seul
  * chemin jusqu'ici, n'est écrit qu'à la fin du tour, donc le travail en cours restait
  * anonyme — rattaché à l'agent mais à aucune session.
  */
 function windowForProc(windows: RunningWindow[], startedAt: number, taken: Set<string>): RunningWindow | null {
+  // une fenêtre ouverte reste ouverte entre deux tours : seule celle qui a bougé depuis le
+  // lancement du process peut être la sienne (un process neuf ouvre ou reprend sa fenêtre)
+  const fresh = windows.filter(
+    (w) => !taken.has(w.sessionKey) && (w.updatedAt ?? w.startedAt ?? 0) >= startedAt - WINDOW_SPAWN_SKEW_MS,
+  );
+  // session neuve : sa fenêtre s'ouvre au moment où le process démarre
   let best: RunningWindow | null = null;
-  for (const w of windows) {
-    if (taken.has(w.sessionKey)) continue;
-    if (w.startedAt !== null && w.startedAt > startedAt + WINDOW_SPAWN_SKEW_MS) continue;
-    if (!best || (w.startedAt ?? 0) > (best.startedAt ?? 0)) best = w;
+  let bestGap = Infinity;
+  for (const w of fresh) {
+    if (w.startedAt === null) continue;
+    const gap = Math.abs(w.startedAt - startedAt);
+    if (gap <= WINDOW_SPAWN_SKEW_MS && gap < bestGap) {
+      best = w;
+      bestGap = gap;
+    }
+  }
+  if (best) return best;
+  // session reprise : fenêtre ancienne, mais active depuis le lancement du process
+  for (const w of fresh) {
+    if (!best || (w.updatedAt ?? 0) > (best.updatedAt ?? 0)) best = w;
   }
   return best;
 }
