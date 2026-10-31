@@ -163,6 +163,108 @@ function resolveEfforts(nodes: GraphNode[]): void {
   saveLastEffort();
 }
 
+// ---------------------------------------------------------------- voies d'un lot (run-lot.sh)
+
+type LotStep = { phase: string; repo: string; card: string; branch: string };
+type LaneInfo = {
+  phase: string;
+  firstTs: number | null;
+  stepTs: number | null;
+  endTs: number | null;
+  step: string | null;
+  okCount: number;
+  finished: boolean;
+  failed: string;
+  stopped: boolean;
+  waiting: boolean;
+  last: string;
+};
+type LotInfo = { prefix: string; logs: string; steps: Map<string, LotStep>; lanes: Map<string, LaneInfo> };
+
+const lotCache = new Map<string, { sig: string; info: LotInfo | null }>();
+
+function readTailText(file: string, bytes: number): string {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, bytes);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    return buf.toString('utf8');
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Voies A / B / FIN d'un lot lancé par `run-lot.sh <dossier> <mode>` : les deux voies sont deux
+ * sous-shells de la même unit, indiscernables par leur ligne de commande. Leur état vit dans
+ * le journal de chaîne (`[voie X]`) et dans `etapes.txt`.
+ */
+function readLot(lotDir: string, mode: string): LotInfo | null {
+  try {
+    const conf = fs.readFileSync(path.join(lotDir, 'lot.conf'), 'utf8');
+    const prefix = conf.match(/^\s*(?:.*;\s*)?PREFIX=(\S+?);?\s*$/m)?.[1] ?? conf.match(/PREFIX=([^\s;]+)/)?.[1];
+    const logs = conf.match(/^LOGS=(\S+)/m)?.[1];
+    if (!prefix || !logs) return null;
+    const chain = path.join(logs, `${prefix}-${mode}-chain.log`);
+    const etapes = path.join(lotDir, 'etapes.txt');
+    const sig = `${fs.statSync(chain).mtimeMs}:${fs.statSync(chain).size}:${fs.statSync(etapes).mtimeMs}`;
+    const hit = lotCache.get(chain);
+    if (hit && hit.sig === sig) return hit.info;
+
+    const steps = new Map<string, LotStep>();
+    for (const l of fs.readFileSync(etapes, 'utf8').split('\n')) {
+      const f = l.trim().split(/\s+/);
+      if (!l.trim() || l.trim().startsWith('#') || f.length < 6) continue;
+      steps.set(f[0], { phase: f[1], repo: f[2], card: f[3], branch: f[4] });
+    }
+    let text = readTailText(chain, 400_000);
+    const start = text.lastIndexOf(`##### ${prefix} ${mode} lancée`);
+    if (start >= 0) text = text.slice(start);
+    const lanes = new Map<string, LaneInfo>();
+    const lane = (ph: string): LaneInfo => {
+      let x = lanes.get(ph);
+      if (!x) {
+        x = { phase: ph, firstTs: null, stepTs: null, endTs: null, step: null, okCount: 0, finished: false, failed: '', stopped: false, waiting: false, last: '' };
+        lanes.set(ph, x);
+      }
+      return x;
+    };
+    for (const line of text.split('\n')) {
+      const m = line.match(/^(\S+) \[voie (\w+)\] (.*)$/);
+      if (!m) continue;
+      const ts = Date.parse(m[1]);
+      const x = lane(m[2]);
+      const msg = m[3];
+      x.last = msg.slice(0, 240);
+      let r: RegExpMatchArray | null;
+      if ((r = msg.match(/^=== étape (\S+) : run Claude Code/))) {
+        x.step = r[1];
+        x.stepTs = Number.isFinite(ts) ? ts : null;
+        x.waiting = false;
+        if (x.firstTs === null) x.firstTs = x.stepTs;
+      } else if (/^OK étape/.test(msg)) {
+        x.okCount++;
+      } else if ((r = msg.match(/^##### phase \w+ terminée : (\d+) étapes OK, en échec :(.*)$/))) {
+        x.finished = true;
+        x.endTs = Number.isFinite(ts) ? ts : null;
+        x.okCount = Number(r[1]);
+        x.failed = /aucune/.test(r[2]) ? '' : r[2].trim();
+      } else if (/^##### phase \w+ arrêtée/.test(msg)) {
+        x.stopped = true;
+      } else if (/attente d'un créneau/.test(msg)) {
+        x.waiting = true;
+      }
+    }
+    const info: LotInfo = { prefix, logs, steps, lanes };
+    lotCache.set(chain, { sig, info });
+    return info;
+  } catch {
+    return null;
+  }
+}
+
 const CMD_MAX = 320;
 
 // ---------------------------------------------------------------- jetons d'un job
@@ -350,12 +452,115 @@ export function buildGraph(ctx: GraphCtx): GraphData {
   }
 
   // --- agents, sessions, sous-agents, jobs
+  const lotOfProcs = (list: GraphProc[]): LotInfo | null => {
+    for (const p of list) {
+      const m = p.cmd.match(/run-lot\.sh\s+(\S+)\s+(pre|impl)\b/);
+      if (m) return readLot(m[1], m[2]);
+    }
+    return null;
+  };
+
+  // pids du sous-arbre de chaque process `claude --print`, rangés par voie d'après le log de l'étape (fd 1)
+  const lanePids = (lot: LotInfo, pids: number[]): Map<string, number[]> => {
+    const inUnit = new Set(pids);
+    const kidsOf = new Map<number, number[]>();
+    for (const pid of pids) {
+      const pp = procs.get(pid)?.ppid;
+      if (pp !== undefined) kidsOf.set(pp, [...(kidsOf.get(pp) ?? []), pid]);
+    }
+    const out = new Map<string, number[]>();
+    for (const pid of pids) {
+      const p = procs.get(pid);
+      if (!p || !/(^|\/)claude(\s|$)/.test(p.cmd.split(' --')[0] ?? '') || !/--print/.test(p.cmd)) continue;
+      let phase: string | null = null;
+      try {
+        const m = fs.readlinkSync(`/proc/${pid}/fd/1`).match(/-([^-/]+)\.log$/);
+        phase = (m && lot.steps.get(m[1])?.phase) || null;
+      } catch {
+        /* pas de droit de lecture : repli sur le répertoire de travail */
+      }
+      if (!phase) {
+        try {
+          phase = /-vB$/.test(fs.readlinkSync(`/proc/${pid}/cwd`)) ? 'B' : 'A';
+        } catch {
+          continue;
+        }
+      }
+      const tree: number[] = [];
+      const walk = (q: number) => {
+        if (!inUnit.has(q) || tree.includes(q)) return;
+        tree.push(q);
+        for (const c of kidsOf.get(q) ?? []) walk(c);
+      };
+      walk(pid);
+      out.set(phase, [...(out.get(phase) ?? []), ...tree]);
+    }
+    return out;
+  };
+
+  const laneNodes = (lot: LotInfo, pidsByPhase: Map<string, number[]>, t: TaskNode, parentId: string): void => {
+    const unitUp = t.state === 'running';
+    const phases = [...new Set([...lot.lanes.keys(), ...pidsByPhase.keys()])].sort();
+    for (const ph of phases) {
+      const info = lot.lanes.get(ph);
+      const lp = pidsByPhase.get(ph) ?? [];
+      const list = procsOf(lp);
+      const live = lp.length > 0;
+      const st = info?.step ? lot.steps.get(info.step) : undefined;
+      const state: GraphNode['state'] = live
+        ? 'running'
+        : info?.finished
+          ? info.failed
+            ? 'failed'
+            : 'done'
+          : info?.stopped
+            ? 'failed'
+            : unitUp
+              ? 'running'
+              : 'idle';
+      const facts: GraphNode['facts'] = [];
+      if (info?.step) facts.push({ k: 'graph.f.step', v: info.step });
+      if (info) facts.push({ k: 'graph.f.stepsDone', v: String(info.okCount) });
+      if (info?.step) facts.push({ k: 'graph.f.log', v: path.join(lot.logs, `${lot.prefix}-${info.step}.log`) });
+      const claude = list.find((p) => /(^|\/)claude(\s|$)/.test(p.cmd.split(' --')[0] ?? ''));
+      const what = st
+        ? `${info?.step} — ${st.repo} · ${st.branch}${st.card !== '-' ? ` · carte ${st.card}` : ''}`
+        : (info?.last ?? '');
+      push({
+        id: `l:${t.id}:${ph}`,
+        parent: parentId,
+        role: 'subagent',
+        kind: 'lane',
+        label: { k: 'graph.lane', p: { ph } },
+        sub: info?.finished && !live ? { k: 'graph.lane.done' } : info?.waiting && !live ? { k: 'graph.lane.waiting' } : what || null,
+        state,
+        startedAt: info?.firstTs ?? claude?.startedAt ?? null,
+        endedAt: live ? null : (info?.endTs ?? null),
+        model: null,
+        effort: claude ? 'default' : null,
+        effortSrc: claude ? 'default' : undefined,
+        activity: what ? { type: 'job', text: REDACT ? null : what } : NONE,
+        usage: live ? jobTokens(lp, procs, now) : null,
+        turnUsage: null,
+        res: live ? resOf(list) : ZERO_RES,
+        procs: list,
+        facts,
+        note: info?.failed ? `échecs :${info.failed}` : null,
+        noteIsError: !!info?.failed,
+      });
+    }
+  };
+
   const jobNode = (t: TaskNode, agent: AgentNode): void => {
     const sysd = t.id.startsWith('systemd:');
     const det = t.id.startsWith('detached:');
     const kind: GraphKind = sysd ? 'systemd' : det ? 'detached' : 'cron';
     const live = t.state === 'running';
-    const list = procsOf(t.pids ?? []);
+    const list0 = procsOf(t.pids ?? []);
+    const lot = sysd ? lotOfProcs(list0) : null;
+    const lanes = lot ? lanePids(lot, t.pids ?? []) : null;
+    const laneSet = new Set([...(lanes?.values() ?? [])].flat());
+    const list = laneSet.size ? list0.filter((p) => !laneSet.has(p.pid)) : list0;
     const claude = list.find((p) => /(^|\/)claude(\s|$)/.test(p.cmd.split(' --')[0] ?? ''));
     const facts: GraphNode['facts'] = [];
     if (sysd) facts.push({ k: 'graph.f.unit', v: t.id.slice('systemd:'.length) });
@@ -383,6 +588,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       note: t.error ?? t.summary,
       noteIsError: !!t.error,
     });
+    if (lot) laneNodes(lot, lanes ?? new Map(), t, `j:${t.id}`);
   };
 
   const sessionNode = (s: SessionNode, agent: AgentNode, parentId: string): void => {
@@ -573,7 +779,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
   if (REDACT) {
     let n = 0;
     for (const g of nodes) {
-      if (g.kind === 'session' || g.kind === 'subagent' || g.kind === 'systemd' || g.kind === 'detached' || g.kind === 'cron') {
+      if (g.kind === 'session' || g.kind === 'subagent' || g.kind === 'lane' || g.kind === 'systemd' || g.kind === 'detached' || g.kind === 'cron') {
         n++;
         g.label = { k: g.kind === 'subagent' ? 'redact.subagent' : 'redact.session', p: { n } };
         g.sub = null;

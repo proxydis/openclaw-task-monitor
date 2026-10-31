@@ -270,6 +270,7 @@ export type GraphKind =
   | 'agent'
   | 'session'
   | 'subagent'
+  | 'lane'
   | 'systemd'
   | 'detached'
   | 'cron'

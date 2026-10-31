@@ -74,6 +74,7 @@ const KIND_RANK: Record<GraphNode['kind'], number> = {
   agent: 1,
   session: 2,
   subagent: 3,
+  lane: 4,
   systemd: 4,
   detached: 5,
   cron: 6,
