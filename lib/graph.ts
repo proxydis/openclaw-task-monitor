@@ -165,7 +165,7 @@ function resolveEfforts(nodes: GraphNode[]): void {
 
 // ---------------------------------------------------------------- voies d'un lot (run-lot.sh)
 
-type LotStep = { phase: string; repo: string; card: string; branch: string };
+type LotStep = { phase: string; repo: string; card: string; branch: string; trello: string | null };
 type LaneInfo = {
   phase: string;
   firstTs: number | null;
@@ -179,7 +179,7 @@ type LaneInfo = {
   waiting: boolean;
   last: string;
 };
-type LotInfo = { prefix: string; logs: string; steps: Map<string, LotStep>; lanes: Map<string, LaneInfo> };
+type LotInfo = { prefix: string; logs: string; steps: Map<string, LotStep>; lanes: Map<string, LaneInfo>; trello: Map<string, string> };
 
 const lotCache = new Map<string, { sig: string; info: LotInfo | null }>();
 
@@ -213,11 +213,14 @@ function readLot(lotDir: string, mode: string): LotInfo | null {
     const hit = lotCache.get(chain);
     if (hit && hit.sig === sig) return hit.info;
 
+    // `declare -A CARTE=([01]=mKpL5LxH [02]=…)` : numéro de carte du lot → identifiant court Trello
+    const trello = new Map<string, string>();
+    for (const m of conf.matchAll(/\[(\d+)\]=([A-Za-z0-9]+)/g)) trello.set(m[1], m[2]);
     const steps = new Map<string, LotStep>();
     for (const l of fs.readFileSync(etapes, 'utf8').split('\n')) {
       const f = l.trim().split(/\s+/);
       if (!l.trim() || l.trim().startsWith('#') || f.length < 6) continue;
-      steps.set(f[0], { phase: f[1], repo: f[2], card: f[3], branch: f[4] });
+      steps.set(f[0], { phase: f[1], repo: f[2], card: f[3], branch: f[4], trello: trello.get(f[3]) ?? null });
     }
     let text = readTailText(chain, 400_000);
     const start = text.lastIndexOf(`##### ${prefix} ${mode} lancée`);
@@ -257,7 +260,7 @@ function readLot(lotDir: string, mode: string): LotInfo | null {
         x.waiting = true;
       }
     }
-    const info: LotInfo = { prefix, logs, steps, lanes };
+    const info: LotInfo = { prefix, logs, steps, lanes, trello };
     lotCache.set(chain, { sig, info });
     return info;
   } catch {
@@ -472,6 +475,13 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     for (const pid of pids) {
       const p = procs.get(pid);
       if (!p || !/(^|\/)claude(\s|$)/.test(p.cmd.split(' --')[0] ?? '') || !/--print/.test(p.cmd)) continue;
+      // un `claude --print` lancé par la passe elle-même (outil, hook, question annexe) appartient à
+      // la voie de cette passe : lui chercher sa propre voie le rangeait dans « A » faute de `-vB`
+      let nested = false;
+      for (let q = procs.get(p.ppid); q && inUnit.has(q.pid) && !nested; q = procs.get(q.ppid)) {
+        nested = /(^|\/)claude(\s|$)/.test(q.cmd.split(' --')[0] ?? '');
+      }
+      if (nested) continue;
       let phase: string | null = null;
       try {
         const m = fs.readlinkSync(`/proc/${pid}/fd/1`).match(/-([^-/]+)\.log$/);
@@ -519,7 +529,11 @@ export function buildGraph(ctx: GraphCtx): GraphData {
               ? 'running'
               : 'idle';
       const facts: GraphNode['facts'] = [];
+      const card = st && st.card !== '-' ? st.card : null;
       if (info?.step) facts.push({ k: 'graph.f.step', v: info.step });
+      if (st) facts.push({ k: 'graph.f.repo', v: st.repo }, { k: 'graph.f.branch', v: st.branch });
+      if (card) facts.push({ k: 'graph.f.card', v: card });
+      if (st?.trello) facts.push({ k: 'graph.f.trello', v: `https://trello.com/c/${st.trello}` });
       if (info) facts.push({ k: 'graph.f.stepsDone', v: String(info.okCount) });
       if (info?.step) facts.push({ k: 'graph.f.log', v: path.join(lot.logs, `${lot.prefix}-${info.step}.log`) });
       const claude = list.find((p) => /(^|\/)claude(\s|$)/.test(p.cmd.split(' --')[0] ?? ''));
@@ -531,7 +545,9 @@ export function buildGraph(ctx: GraphCtx): GraphData {
         parent: parentId,
         role: 'subagent',
         kind: 'lane',
-        label: { k: 'graph.lane', p: { ph } },
+        // la carte n'est dans le titre que pour une passe en cours : une voie finie ou en attente
+        // porte encore l'étape précédente, la montrer en titre ferait croire qu'elle y travaille
+        label: live && card ? { k: 'graph.laneCard', p: { ph, card } } : { k: 'graph.lane', p: { ph } },
         sub: info?.finished && !live ? { k: 'graph.lane.done' } : info?.waiting && !live ? { k: 'graph.lane.waiting' } : what || null,
         state,
         startedAt: info?.firstTs ?? claude?.startedAt ?? null,
