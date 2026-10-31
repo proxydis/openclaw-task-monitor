@@ -266,7 +266,12 @@ export function readCliSessionKeyIndex(agentIds: string[]): Map<string, string> 
 // ------------------------------------------------------- tours en cours (session_windows)
 
 /** Tour ouvert sur une session : la gateway écrit la ligne au *démarrage* du tour. */
-export type RunningWindow = { sessionKey: string; sessionId: string | null; startedAt: number | null };
+export type RunningWindow = {
+  sessionKey: string;
+  sessionId: string | null;
+  startedAt: number | null;
+  updatedAt: number | null;
+};
 
 const winCache = new Map<string, { sig: string; data: RunningWindow[] }>();
 
@@ -291,16 +296,25 @@ export function readRunningWindows(agentId: string): RunningWindow[] {
     const hit = winCache.get(agentId);
     if (hit && hit.sig === sig) return hit.data;
 
+    // OpenClaw >= 2026.10 laisse `status` à NULL tant que la fenêtre est ouverte (il ne prend
+    // une valeur qu'à la clôture) : « ouverte » = `ended_at` NULL, `running` n'existe plus.
     const rows = db
       .prepare(
-        "select session_key, session_id, started_at from session_windows" +
-          " where ended_at is null and status = 'running' order by started_at desc",
+        "select session_key, session_id, started_at, updated_at from session_windows" +
+          " where ended_at is null and (status is null or status = 'running')" +
+          " order by coalesce(updated_at, started_at) desc",
       )
-      .all() as unknown as { session_key: string; session_id: string | null; started_at: number | null }[];
+      .all() as unknown as {
+      session_key: string;
+      session_id: string | null;
+      started_at: number | null;
+      updated_at: number | null;
+    }[];
     const data: RunningWindow[] = rows.map((r) => ({
       sessionKey: r.session_key,
       sessionId: r.session_id ?? null,
       startedAt: r.started_at ?? null,
+      updatedAt: r.updated_at ?? null,
     }));
     winCache.set(agentId, { sig, data });
     return data;
