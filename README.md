@@ -24,6 +24,12 @@ produces: the SQLite state database, session files, transcripts and `/proc`.
 - **Short task title**, extracted from the last user message of the transcript, to tell
   at a glance what the work in progress is about
 - **Machine health**: CPU, memory, swap, load, gateway uptime
+- **Graph view** — who launched whom: Gateway → agents → sessions → subagents and separate
+  jobs, drawn as an animated pannable/zoomable graph. Clicking a node opens its type (agent,
+  subagent, separate job), launch time, model and effort level, what it is doing (prompt,
+  command or job), live token count since launch, state, and every process it owns. Every
+  live OpenClaw process is placed in exactly one node (gateway workers, browser, `openclaw-*`
+  services and stray processes included). Served by `/api/graph`, polled only while the tab is open
 - Live detail panel, text filter, raw process tab
 - **Interface in English or French**, switchable from the `EN / FR` toggle in the top-right
   corner (English by default, choice remembered in the browser)

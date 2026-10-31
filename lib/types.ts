@@ -94,6 +94,8 @@ export type TaskNode = {
    * chiffres différents sur deux lignes voisines comme une incohérence.
    */
   usageScope?: 'turn';
+  /** process rattachés à un job (systemd, détaché) ; absent des autres tâches */
+  pids?: number[];
   children: TaskNode[];
 };
 
@@ -256,4 +258,72 @@ export type Snapshot = {
   };
   procs: ProcInfo[];
   warnings: Msg[];
+};
+
+// ------------------------------------------------------------------ vue Graph
+
+/** Rôle affiché dans le panneau : agent, sous-agent, job séparé, ou infrastructure OpenClaw. */
+export type GraphRole = 'infra' | 'agent' | 'subagent' | 'job';
+
+export type GraphKind =
+  | 'gateway'
+  | 'agent'
+  | 'session'
+  | 'subagent'
+  | 'systemd'
+  | 'detached'
+  | 'cron'
+  | 'service'
+  | 'browser'
+  | 'other';
+
+export type GraphProc = {
+  pid: number;
+  ppid: number;
+  comm: string;
+  cmd: string;
+  cpuPct: number;
+  rssMb: number;
+  startedAt: number;
+};
+
+/** Ce que fait l'unité : un prompt (agent), une commande (process), un job (systemd, cron). */
+export type GraphActivity = { type: 'prompt' | 'command' | 'job' | 'none'; text: Msg | null };
+
+export type GraphNode = {
+  id: string;
+  /** `null` pour la racine (la gateway) */
+  parent: string | null;
+  role: GraphRole;
+  kind: GraphKind;
+  label: Msg;
+  sub: Msg | null;
+  state: UnitState;
+  startedAt: number | null;
+  endedAt: number | null;
+  model: string | null;
+  /** niveau d'effort (`--effort` du CLI), `null` quand aucun process ne le porte */
+  effort: string | null;
+  activity: GraphActivity;
+  /** jetons depuis la création de la session ; `null` : rien de mesurable (tiret, pas zéro) */
+  usage: TokenUsage | null;
+  /** jetons du tour en cours, quand il existe */
+  turnUsage: TokenUsage | null;
+  res: Res;
+  /** tous les process de l'unité, sans filtre de seuil CPU/RAM */
+  procs: GraphProc[];
+  /** couples (clé de catalogue, valeur brute) : canal, clé de session, unité, répertoire… */
+  facts: { k: string; v: string }[];
+  /** résumé ou erreur de l'unité */
+  note: Msg | null;
+  noteIsError: boolean;
+};
+
+export type GraphData = {
+  ts: number;
+  nodes: GraphNode[];
+  /** process OpenClaw distincts présents dans le graphe */
+  procCount: number;
+  /** `true` si le graphe contient aussi les unités inactives ou terminées récentes */
+  inactive: boolean;
 };

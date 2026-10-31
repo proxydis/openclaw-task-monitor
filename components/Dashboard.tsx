@@ -20,6 +20,7 @@ import { LangProvider, LangSwitch, useI18n } from './LangProvider';
 import { ago, agoRel, clock, dur, lvl, mb, mbShort, resetIn, share, tokens, tokensFull, usd, weekdayTime } from './format';
 import CrabLogo from './CrabLogo';
 import WorkTab from './WorkTab';
+import { GraphDetail, GraphView, useGraph } from './GraphView';
 
 // ------------------------------------------------------------------ flux
 
@@ -1057,13 +1058,15 @@ function DashboardInner() {
   const [expandAll, setExpandAll] = useState(false);
   const openRef = useRef(open);
   const [selRef, setSelRef] = useState<SelRef | null>(null);
-  const [tab, setTab] = useState<'tree' | 'procs' | 'work'>('tree');
+  const [tab, setTab] = useState<'tree' | 'procs' | 'work' | 'graph'>('tree');
+  const [graphSel, setGraphSel] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [runningOnly, setRunningOnly] = useState(true);
   const [showIdle, setShowIdle] = useState(true);
   const [showDone, setShowDone] = useState(true);
   const bootstrapped = useRef(false);
   const { plan, refresh: refreshPlan, busy: planBusy } = usePlan(snap?.plan ?? null);
+  const graph = useGraph(tab === 'graph', !runningOnly);
 
   // ouvre automatiquement les agents actifs au premier chargement
   useEffect(() => {
@@ -1281,6 +1284,9 @@ function DashboardInner() {
               <button className={`tab${tab === 'work' ? ' on' : ''}`} onClick={() => setTab('work')}>
                 {tr('tab.work')}
               </button>
+              <button className={`tab${tab === 'graph' ? ' on' : ''}`} onClick={() => setTab('graph')}>
+                {tr('tab.graph')}
+              </button>
             </div>
             {tab === 'tree' ? (
               <button
@@ -1326,6 +1332,17 @@ function DashboardInner() {
 
           {tab === 'work' ? (
             <WorkTab />
+          ) : tab === 'graph' ? (
+            <GraphView
+              data={graph.data}
+              err={graph.err}
+              runningOnly={runningOnly}
+              showIdle={showIdle}
+              showDone={showDone}
+              q={q}
+              selId={graphSel}
+              onSelect={setGraphSel}
+            />
           ) : tab === 'procs' ? (
             <Procs procs={snap.procs} />
           ) : (
@@ -1386,14 +1403,18 @@ function DashboardInner() {
             </div>
           )}
 
-          {tab !== 'work' ? <Legend /> : null}
+          {tab === 'tree' || tab === 'procs' ? <Legend /> : null}
         </div>
 
         <div className="side">
           {plan ? (
             <PlanCard plan={plan} models={snap?.modelUsage ?? null} refresh={refreshPlan} busy={planBusy} />
           ) : null}
-          <Detail sel={sel} />
+          {tab === 'graph' ? (
+            <GraphDetail data={graph.data} selId={graphSel} onSelect={setGraphSel} />
+          ) : (
+            <Detail sel={sel} />
+          )}
         </div>
       </div>
     </div>

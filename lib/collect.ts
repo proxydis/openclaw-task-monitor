@@ -25,8 +25,9 @@ import {
   type TaskRow,
   type Transcript,
 } from './store';
+import { buildGraph, effortOfCmd, type GraphRuntime } from './graph';
 import { beginTokenCycle, readDbTokens, readSessionTokens, readSessionTokensSince, sumTokens } from './token-usage';
-import type { AgentNode, Msg, ProcInfo, Res, SessionNode, Snapshot, TaskNode, TokenUsage, UnitState } from './types';
+import type { AgentNode, GraphData, Msg, ProcInfo, Res, SessionNode, Snapshot, TaskNode, TokenUsage, UnitState } from './types';
 import { ZERO_RES } from './types';
 
 function res(pids: number[], procs: Map<number, RawProc>): Res {
@@ -422,6 +423,7 @@ function systemdJobNode(j: SystemdJob, r: Res): TaskNode {
     error: st === 'failed' || st === 'killed' ? { k: 'job.ended', p: { result: j.result || j.subState } } : null,
     res: live ? r : ZERO_RES,
     usage: null, // job systemd : aucune session CLI à interroger
+    pids: live ? j.pids : [],
     children: [],
   };
 }
@@ -545,6 +547,7 @@ function detachedJobNode(j: DetachedJob, r: Res): TaskNode {
     error: null,
     res: endedAt ? ZERO_RES : r,
     usage: null, // job détaché : aucune session CLI à interroger
+    pids: endedAt ? [] : j.pids,
     children: [],
   };
 }
@@ -587,6 +590,11 @@ function redactSnapshot(snap: Snapshot): Snapshot {
 }
 
 export function collect(opts: { window?: number } = {}): Snapshot {
+  return collectAll(opts).snapshot;
+}
+
+/** Instantané du tableau de bord et graphe de la vue Graph, issus d'un seul balayage de `/proc`. */
+export function collectAll(opts: { window?: number } = {}): { snapshot: Snapshot; graph: GraphData } {
   const t0 = Date.now();
   const procs = scanProcs();
   const kids = childIndex(procs);
@@ -626,6 +634,7 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   // répartition par modèle : tous les transcripts de l'hôte, budget de lecture séparé
   scanModelUsage();
   const runtimeProcs: RuntimeProc[] = [];
+  const runtimeCmds = new Map<number, string>(); // pid -> ligne de commande (effort, modèle : vue Graph)
   for (const p of procs.values()) {
     const isRuntime =
       /openclaw-cli-system-prompt/.test(p.cmd) ||
@@ -640,12 +649,14 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       sessionKey: byCmd.sessionKey ?? byPrompt?.sessionKey ?? null,
       model: byCmd.model ?? byPrompt?.model ?? null,
     });
+    runtimeCmds.set(p.pid, p.cmd);
   }
 
   const runtimeRoots = new Set(runtimeProcs.map((r) => r.pid));
   const sessionPids = new Map<string, number[]>(); // sessionKey -> pids
   const agentLoosePids = new Map<string, number[]>(); // agentId -> pids sans session identifiée
   const claimed = new Set<number>();
+  const graphRuntimes: GraphRuntime[] = [];
 
   // tours ouverts par agent : la seule source qui existe *pendant* le tour
   const windowsByAgent = new Map<string, RunningWindow[]>();
@@ -680,6 +691,17 @@ export function collect(opts: { window?: number } = {}): Snapshot {
         boundKeys.add(w.sessionKey);
       }
     }
+    const info: GraphRuntime = {
+      pid: rp.pid,
+      agentId: rp.agentId,
+      sessionKey: key,
+      model: rp.model,
+      effort: effortOfCmd(runtimeCmds.get(rp.pid) ?? ''),
+      cliSessionId: cliSessionIdOfCmd(runtimeCmds.get(rp.pid) ?? ''),
+      startedAt: procs.get(rp.pid)?.startedAt ?? null,
+      pids: tree,
+    };
+    graphRuntimes.push(info);
     if (key) {
       const arr = sessionPids.get(key) ?? [];
       arr.push(...tree);
@@ -698,10 +720,12 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   // --- gateway (hors sous-arbres déjà attribués)
   let gatewayRes: Res = ZERO_RES;
   let gatewayUptime: number | null = null;
+  let gatewayOwn: number[] = [];
   if (gatewayPid !== null) {
     const tree = descendants(gatewayPid, kids, new Set([...runtimeRoots, ...(browserRoot ? [browserRoot] : [])]));
     const own = tree.filter((pid) => !claimed.has(pid));
     for (const pid of own) claimed.add(pid);
+    gatewayOwn = own;
     gatewayRes = res(own, procs);
     const gp = procs.get(gatewayPid);
     gatewayUptime = gp ? Math.round((Date.now() - gp.startedAt) / 1000) : null;
@@ -1171,5 +1195,14 @@ export function collect(opts: { window?: number } = {}): Snapshot {
     warnings,
   };
 
-  return REDACT ? redactSnapshot(snapshot) : snapshot;
+  const graph = buildGraph({
+    now,
+    agents,
+    procs,
+    gateway: { pid: gatewayPid, ownPids: gatewayOwn, res: gatewayRes, port: gatewayPort, uptimeSec: gatewayUptime },
+    browserPids,
+    runtimes: graphRuntimes,
+    looseByAgent: agentLoosePids,
+  });
+  return { snapshot: REDACT ? redactSnapshot(snapshot) : snapshot, graph };
 }
