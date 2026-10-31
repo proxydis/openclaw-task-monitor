@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { claudeProjectsDir } from './claude-cli';
+import { configuredEffort, recallEffort, rememberEffort, type Effort } from './effort';
 import { unitOfPid, type RawProc } from './procs';
 import { REDACT } from './store';
 import { readSessionTokens, sumTokens } from './token-usage';
@@ -192,6 +193,15 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     return id;
   };
   const NONE: GraphActivity = { type: 'none', text: null };
+  const NO_EFFORT = { effort: null, effortSource: null, effortAt: null } as const;
+  const asNode = (e: Effort | null) =>
+    e ? { effort: e.value, effortSource: e.source, effortAt: e.at } : NO_EFFORT;
+  /** process vivant : le drapeau fait foi, son absence veut dire « adaptive » */
+  const liveEffort = (r: GraphRuntime): Effort => ({
+    value: r.effort ?? 'adaptive',
+    source: r.effort ? 'live' : 'adaptive',
+    at: null,
+  });
 
   // runtime vivant par session : le plus récent l'emporte
   const runtimeByKey = new Map<string, GraphRuntime>();
@@ -216,7 +226,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     startedAt: gwProc?.startedAt ?? null,
     endedAt: null,
     model: null,
-    effort: null,
+    ...NO_EFFORT,
     activity: gwProc ? { type: 'command', text: REDACT ? null : gwProc.cmd.slice(0, CMD_MAX) } : NONE,
     usage: null,
     turnUsage: null,
@@ -242,7 +252,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       startedAt: root?.startedAt ?? null,
       endedAt: null,
       model: null,
-      effort: null,
+      ...NO_EFFORT,
       activity: root ? { type: 'command', text: REDACT ? null : root.cmd } : NONE,
       usage: null,
       turnUsage: null,
@@ -276,7 +286,15 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       startedAt: t.startedAt ?? t.createdAt,
       endedAt: t.endedAt,
       model: claude ? modelOfCmd(claude.cmd) : null,
-      effort: claude ? effortOfCmd(claude.cmd) : null,
+      // un `claude` de job sans drapeau tourne au réglage par défaut du CLI ; un job qui n'est
+      // pas un process d'IA n'a pas d'effort à montrer
+      ...asNode(
+        claude
+          ? effortOfCmd(claude.cmd)
+            ? { value: effortOfCmd(claude.cmd)!, source: 'live', at: null }
+            : { value: 'default', source: 'default', at: null }
+          : null,
+      ),
       activity: activityOfTask(t, kind === 'cron' ? 'job' : 'command'),
       usage: live ? jobTokens(t.pids ?? [], procs, now) : null,
       turnUsage: null,
@@ -298,6 +316,15 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     if (s.turns) facts.push({ k: 'graph.f.turns', v: String(s.turns) });
     if (rt) facts.push({ k: 'graph.f.pid', v: String(rt.pid) });
     const runningTask = s.tasks.find((t) => t.state === 'running');
+    const model = rt?.model ?? s.model ?? agent.model;
+    let eff: Effort | null = null;
+    if (rt) {
+      eff = liveEffort(rt);
+      rememberEffort(`s:${s.key}`, eff.value, now);
+      rememberEffort(`a:${agent.id}`, eff.value, now);
+    } else {
+      eff = recallEffort(`s:${s.key}`) ?? configuredEffort(agent.id, model) ?? recallEffort(`a:${agent.id}`, 'agentLast');
+    }
     const id = push({
       id: `s:${s.key}`,
       parent: parentId,
@@ -308,8 +335,8 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       state: s.state,
       startedAt: rt?.startedAt ?? s.startedAt,
       endedAt: null,
-      model: rt?.model ?? s.model ?? agent.model,
-      effort: rt?.effort ?? null,
+      model,
+      ...asNode(eff),
       activity: s.prompt
         ? { type: 'prompt', text: s.prompt }
         : runningTask
@@ -344,6 +371,12 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     // process de l'agent que ni une session ni un run non identifié ne porte
     const rest = (ctx.looseByAgent.get(a.id) ?? []).filter((pid) => !looseCovered.has(pid));
     const list = procsOf(rest);
+    // l'exécution la plus récente donne l'effort de l'agent ; sans exécution, dernière valeur vue puis config
+    const newest = [...live].sort((x, y) => (y.startedAt ?? 0) - (x.startedAt ?? 0))[0];
+    const agentEffort: Effort | null = newest
+      ? liveEffort(newest)
+      : (recallEffort(`a:${a.id}`) ?? configuredEffort(a.id, a.model));
+    if (newest) rememberEffort(`a:${a.id}`, liveEffort(newest).value, now);
     push({
       id: agentId,
       parent: 'gw',
@@ -358,7 +391,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       ),
       endedAt: null,
       model: a.model,
-      effort: live.length && live.every((r) => r.effort === live[0].effort) ? live[0].effort : null,
+      ...asNode(agentEffort),
       activity: NONE,
       usage: a.usage,
       turnUsage: null,
@@ -384,7 +417,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
         startedAt: r.startedAt,
         endedAt: null,
         model: r.model ?? a.model,
-        effort: r.effort,
+        ...asNode(liveEffort(r)),
         activity: NONE,
         usage: r.cliSessionId ? readSessionTokens(r.cliSessionId) : null,
         turnUsage: null,
@@ -437,7 +470,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       startedAt: main?.startedAt ?? null,
       endedAt: null,
       model: null,
-      effort: null,
+      ...NO_EFFORT,
       activity: main ? { type: 'command', text: REDACT ? null : main.cmd } : NONE,
       usage: null,
       turnUsage: null,
@@ -460,7 +493,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       startedAt: list.reduce<number | null>((m, p) => (m === null || p.startedAt < m ? p.startedAt : m), null),
       endedAt: null,
       model: null,
-      effort: null,
+      ...NO_EFFORT,
       activity: NONE,
       usage: null,
       turnUsage: null,
