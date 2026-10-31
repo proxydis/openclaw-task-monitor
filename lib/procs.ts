@@ -130,6 +130,46 @@ export function getHostCpuPct(): number {
   return Math.round(hostCpuPct * 10) / 10;
 }
 
+// Sondes CPU par ordre de préférence : k10temp (AMD, Tctl) puis coretemp (Intel, package).
+const CPU_HWMON = ['k10temp', 'zenpower', 'coretemp'];
+let cpuTempPath: string | null | undefined;
+
+function findCpuTempPath(): string | null {
+  try {
+    const dirs = fs.readdirSync('/sys/class/hwmon').map((d) => `/sys/class/hwmon/${d}`);
+    const named = dirs.map((d) => {
+      let name = '';
+      try {
+        name = fs.readFileSync(`${d}/name`, 'utf8').trim();
+      } catch {
+        /* noop */
+      }
+      return { d, name };
+    });
+    for (const want of CPU_HWMON) {
+      const hit = named.find((x) => x.name === want);
+      if (hit && fs.existsSync(`${hit.d}/temp1_input`)) return `${hit.d}/temp1_input`;
+    }
+  } catch {
+    /* noop */
+  }
+  return null;
+}
+
+/** Température CPU en °C, `null` si aucune sonde lisible. Le chemin hwmon est résolu une fois. */
+export function readCpuTempC(): number | null {
+  if (cpuTempPath === undefined) cpuTempPath = findCpuTempPath();
+  if (!cpuTempPath) return null;
+  try {
+    const milli = Number(fs.readFileSync(cpuTempPath, 'utf8').trim());
+    return Number.isFinite(milli) ? Math.round(milli / 100) / 10 : null;
+  } catch {
+    // numérotation hwmon changée (rechargement de module) : on relocalise au prochain tick
+    cpuTempPath = undefined;
+    return null;
+  }
+}
+
 export function readMemInfo() {
   const info: Record<string, number> = {};
   try {

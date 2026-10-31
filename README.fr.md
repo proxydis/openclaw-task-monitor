@@ -25,6 +25,13 @@ déjà produites par OpenClaw : base d'état SQLite, fichiers de sessions, trans
 - **Titre court de la tâche**, extrait du dernier message utilisateur du transcript, pour
   identifier d'un coup d'œil la nature du travail en cours
 - **Santé machine** : CPU, mémoire, swap, load, uptime de la gateway
+- **Vue Graph** — qui a lancé qui : Gateway → agents → sessions → sous-agents et jobs séparés,
+  dessinés en graphe animé, déplaçable et zoomable. Un clic sur un nœud ouvre son type (agent,
+  sous-agent, job séparé), l'heure de lancement, le modèle et le niveau d'effort, ce qu'il fait
+  (prompt, commande ou job), les jetons consommés en direct depuis le lancement, son état et tous
+  ses process. Chaque process OpenClaw vivant est rangé dans un nœud et un seul (workers de la
+  gateway, navigateur, services `openclaw-*` et process isolés compris). Servie par `/api/graph`,
+  interrogée seulement tant que l'onglet est ouvert
 - Panneau de détail vivant, filtre texte, onglet des process bruts
 - **Interface en anglais ou en français**, via le sélecteur `EN / FR` en haut à droite
   (anglais par défaut, choix mémorisé dans le navigateur)
@@ -114,7 +121,7 @@ Tout se règle par variables d'environnement.
 | `HOSTNAME` | `127.0.0.1` | interface d'écoute |
 | `OPENCLAW_HOME` | `~/.openclaw` | racine de l'installation supervisée |
 | `MONITOR_REDACT` | — | `1` masque tout contenu métier (voir ci-dessous) |
-| `MONITOR_PLAN_USAGE` | — | `0` désactive la carte des limites de forfait (aucun appel réseau) |
+| `MONITOR_PLAN_USAGE` | — | `0` désactive la carte des limites de forfait (aucun appel réseau) et son onglet *Par modèle* (aucune lecture des transcripts) |
 | `MONITOR_PLAN_TTL_MS` | `600000` | période d'interrogation du relevé d'usage ; l'API n'accorde qu'environ un appel toutes les 5 min, descendre plus bas fait limiter le compte |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | emplacement du jeton OAuth Claude Code (lecture seule) |
 

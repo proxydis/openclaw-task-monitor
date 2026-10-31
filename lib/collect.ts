@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import { getPlanUsage } from './anthropic-usage';
-import { childIndex, descendants, getHostCpuPct, readMemInfo, scanProcs, unitOfPid, type RawProc } from './procs';
+import { getModelUsage, scanModelUsage } from './model-usage';
+import { childIndex, descendants, getHostCpuPct, readCpuTempC, readMemInfo, scanProcs, unitOfPid, type RawProc } from './procs';
 import { collectSystemdJobs, infraMainPids, jobCommand, type SystemdJob } from './systemd-jobs';
 import { agentForPath, agentForText, withWorkspaces } from './workspaces';
 import {
@@ -12,18 +13,21 @@ import {
   readCliSessionIndex,
   readCliSessionKeyIndex,
   readDb,
+  readRunningWindows,
   readSessions,
   readTranscript,
   type AgentCfg,
   type CliSessionRef,
   type CronRow,
+  type RunningWindow,
   type SessionMeta,
   type SubagentRow,
   type TaskRow,
   type Transcript,
 } from './store';
-import { beginTokenCycle, readDbTokens, readSessionTokens, sumTokens } from './token-usage';
-import type { AgentNode, Msg, ProcInfo, Res, SessionNode, Snapshot, TaskNode, TokenUsage, UnitState } from './types';
+import { buildGraph, effortOfCmd, type GraphRuntime } from './graph';
+import { beginTokenCycle, readDbTokens, readSessionTokens, readSessionTokensSince, sumTokens } from './token-usage';
+import type { AgentNode, GraphData, Msg, ProcInfo, Res, SessionNode, Snapshot, TaskNode, TokenUsage, UnitState } from './types';
 import { ZERO_RES } from './types';
 
 function res(pids: number[], procs: Map<number, RawProc>): Res {
@@ -212,6 +216,48 @@ export function resolveFromCmdline(
   };
 }
 
+/**
+ * Tolérance entre l'ouverture du tour en base et le démarrage du process CLI. La gateway
+ * écrit la ligne `session_windows` juste avant de lancer `claude`, mais rien ne garantit
+ * l'ordre à la milliseconde : le relevé en direct a montré le process démarré ~6 s *avant*
+ * l'horodatage de sa propre fenêtre.
+ */
+const WINDOW_SPAWN_SKEW_MS = 120_000;
+
+/**
+ * Session d'un process CLI que sa ligne de commande n'a pas suffi à identifier.
+ *
+ * On retient, parmi les fenêtres ouvertes non réclamées et actives depuis le lancement du
+ * process, celle qui s'est ouverte au même moment (session neuve) ou, à défaut, la plus
+ * récemment active (session reprise). C'est le filet qui manquait : `session_nodes.cliSessionIds`, seul
+ * chemin jusqu'ici, n'est écrit qu'à la fin du tour, donc le travail en cours restait
+ * anonyme — rattaché à l'agent mais à aucune session.
+ */
+function windowForProc(windows: RunningWindow[], startedAt: number, taken: Set<string>): RunningWindow | null {
+  // une fenêtre ouverte reste ouverte entre deux tours : seule celle qui a bougé depuis le
+  // lancement du process peut être la sienne (un process neuf ouvre ou reprend sa fenêtre)
+  const fresh = windows.filter(
+    (w) => !taken.has(w.sessionKey) && (w.updatedAt ?? w.startedAt ?? 0) >= startedAt - WINDOW_SPAWN_SKEW_MS,
+  );
+  // session neuve : sa fenêtre s'ouvre au moment où le process démarre
+  let best: RunningWindow | null = null;
+  let bestGap = Infinity;
+  for (const w of fresh) {
+    if (w.startedAt === null) continue;
+    const gap = Math.abs(w.startedAt - startedAt);
+    if (gap <= WINDOW_SPAWN_SKEW_MS && gap < bestGap) {
+      best = w;
+      bestGap = gap;
+    }
+  }
+  if (best) return best;
+  // session reprise : fenêtre ancienne, mais active depuis le lancement du process
+  for (const w of fresh) {
+    if (!best || (w.updatedAt ?? 0) > (best.updatedAt ?? 0)) best = w;
+  }
+  return best;
+}
+
 // ---------------------------------------------------------------- tâches
 
 function taskState(t: TaskRow): UnitState {
@@ -256,6 +302,32 @@ function toTaskNode(t: TaskRow, r: Res, usage: TokenUsage | null = null): TaskNo
   };
 }
 
+/**
+ * Heure d'ouverture du tour en cours.
+ *
+ * Deux bornes possibles, la première est la bonne : `session_windows.started_at`, écrit
+ * par la gateway au démarrage du tour, donc exactement l'instant cherché. Le démarrage
+ * du process CLI n'en est qu'une approximation — il précède la fenêtre de quelques
+ * secondes, et un process qui enchaîne plusieurs tours garde l'heure du premier.
+ *
+ * La fenêtre est écartée quand elle précède le process de plus de `WINDOW_SPAWN_SKEW_MS` :
+ * une ligne `running` jamais refermée (tour interrompu) date alors d'un tour révolu et
+ * ferait compter des appels qui n'appartiennent pas au tour affiché.
+ */
+function turnStartedAt(
+  windowStartedAt: number | null,
+  pids: number[],
+  procs: Map<number, RawProc>,
+): number | null {
+  const procStart = pids.reduce((min, pid) => {
+    const p = procs.get(pid);
+    return p && (min === null || p.startedAt < min) ? p.startedAt : min;
+  }, null as number | null);
+  if (windowStartedAt === null) return procStart;
+  if (procStart === null) return windowStartedAt;
+  return windowStartedAt < procStart - WINDOW_SPAWN_SKEW_MS ? procStart : windowStartedAt;
+}
+
 /** Tour en cours : synthétisé depuis le process vivant + le dernier prompt du transcript. */
 function liveTurnNode(
   key: string,
@@ -263,12 +335,9 @@ function liveTurnNode(
   detail: Msg | null,
   pids: number[],
   r: Res,
-  procs: Map<number, RawProc>,
+  startedAt: number | null,
+  usage: TokenUsage | null,
 ): TaskNode {
-  const startedAt = pids.reduce((min, pid) => {
-    const p = procs.get(pid);
-    return p && (min === null || p.startedAt < min) ? p.startedAt : min;
-  }, null as number | null);
   return {
     id: `turn:${key}`,
     kind: 'task',
@@ -283,9 +352,11 @@ function liveTurnNode(
     summary: { k: 'task.activeProcs', p: { n: pids.length } },
     error: null,
     res: r,
-    // le décompte de jetons porte sur la session entière, pas sur ce seul tour : le
-    // reporter ici ferait lire le total de la session comme le coût du tour en cours
-    usage: null,
+    // somme des seuls appels API postérieurs à l'ouverture du tour, pas le cumul de la
+    // session : un sous-ensemble de celui de la session juste au-dessus, jamais un
+    // supplément — il ne remonte donc ni vers la session ni vers l'agent
+    usage,
+    usageScope: 'turn',
     children: [],
   };
 }
@@ -352,6 +423,7 @@ function systemdJobNode(j: SystemdJob, r: Res): TaskNode {
     error: st === 'failed' || st === 'killed' ? { k: 'job.ended', p: { result: j.result || j.subState } } : null,
     res: live ? r : ZERO_RES,
     usage: null, // job systemd : aucune session CLI à interroger
+    pids: live ? j.pids : [],
     children: [],
   };
 }
@@ -475,6 +547,7 @@ function detachedJobNode(j: DetachedJob, r: Res): TaskNode {
     error: null,
     res: endedAt ? ZERO_RES : r,
     usage: null, // job détaché : aucune session CLI à interroger
+    pids: endedAt ? [] : j.pids,
     children: [],
   };
 }
@@ -517,6 +590,11 @@ function redactSnapshot(snap: Snapshot): Snapshot {
 }
 
 export function collect(opts: { window?: number } = {}): Snapshot {
+  return collectAll(opts).snapshot;
+}
+
+/** Instantané du tableau de bord et graphe de la vue Graph, issus d'un seul balayage de `/proc`. */
+export function collectAll(opts: { window?: number } = {}): { snapshot: Snapshot; graph: GraphData } {
   const t0 = Date.now();
   const procs = scanProcs();
   const kids = childIndex(procs);
@@ -553,7 +631,10 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   // index inverse + ouverture du budget de lecture des transcripts (colonnes IN/OUT/CACHE)
   const cliByKey = readCliSessionKeyIndex(agentsCfg.map((a) => a.id));
   beginTokenCycle();
+  // répartition par modèle : tous les transcripts de l'hôte, budget de lecture séparé
+  scanModelUsage();
   const runtimeProcs: RuntimeProc[] = [];
+  const runtimeCmds = new Map<number, string>(); // pid -> ligne de commande (effort, modèle : vue Graph)
   for (const p of procs.values()) {
     const isRuntime =
       /openclaw-cli-system-prompt/.test(p.cmd) ||
@@ -568,20 +649,63 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       sessionKey: byCmd.sessionKey ?? byPrompt?.sessionKey ?? null,
       model: byCmd.model ?? byPrompt?.model ?? null,
     });
+    runtimeCmds.set(p.pid, p.cmd);
   }
 
   const runtimeRoots = new Set(runtimeProcs.map((r) => r.pid));
   const sessionPids = new Map<string, number[]>(); // sessionKey -> pids
   const agentLoosePids = new Map<string, number[]>(); // agentId -> pids sans session identifiée
   const claimed = new Set<number>();
+  const graphRuntimes: GraphRuntime[] = [];
 
-  for (const rp of runtimeProcs) {
+  // tours ouverts par agent : la seule source qui existe *pendant* le tour
+  const windowsByAgent = new Map<string, RunningWindow[]>();
+  // heure d'ouverture du tour par session : borne basse de la conso du tour en cours.
+  // Les lignes arrivent triées par `started_at` décroissant, la première gagne.
+  const windowStartByKey = new Map<string, number>();
+  for (const cfg of agentsCfg) {
+    const w = readRunningWindows(cfg.id);
+    if (w.length) windowsByAgent.set(cfg.id, w);
+    for (const win of w) {
+      if (win.startedAt !== null && !windowStartByKey.has(win.sessionKey)) {
+        windowStartByKey.set(win.sessionKey, win.startedAt);
+      }
+    }
+  }
+  // une session déjà reliée par son uuid CLI ne doit pas être réattribuée à un autre process
+  const boundKeys = new Set(runtimeProcs.map((r) => r.sessionKey).filter((k): k is string => !!k));
+
+  // du process le plus récent au plus ancien : un sous-agent réclame son propre tour avant son parent
+  const byRecency = [...runtimeProcs].sort(
+    (a, b) => (procs.get(b.pid)?.startedAt ?? 0) - (procs.get(a.pid)?.startedAt ?? 0),
+  );
+  for (const rp of byRecency) {
     const tree = descendants(rp.pid, kids, new Set([...runtimeRoots].filter((x) => x !== rp.pid)));
     for (const pid of tree) claimed.add(pid);
-    if (rp.sessionKey) {
-      const arr = sessionPids.get(rp.sessionKey) ?? [];
+    let key = rp.sessionKey;
+    if (!key && rp.agentId) {
+      const startedAt = procs.get(rp.pid)?.startedAt ?? Date.now();
+      const w = windowForProc(windowsByAgent.get(rp.agentId) ?? [], startedAt, boundKeys);
+      if (w) {
+        key = w.sessionKey;
+        boundKeys.add(w.sessionKey);
+      }
+    }
+    const info: GraphRuntime = {
+      pid: rp.pid,
+      agentId: rp.agentId,
+      sessionKey: key,
+      model: rp.model,
+      effort: effortOfCmd(runtimeCmds.get(rp.pid) ?? ''),
+      cliSessionId: cliSessionIdOfCmd(runtimeCmds.get(rp.pid) ?? ''),
+      startedAt: procs.get(rp.pid)?.startedAt ?? null,
+      pids: tree,
+    };
+    graphRuntimes.push(info);
+    if (key) {
+      const arr = sessionPids.get(key) ?? [];
       arr.push(...tree);
-      sessionPids.set(rp.sessionKey, arr);
+      sessionPids.set(key, arr);
     } else if (rp.agentId) {
       const arr = agentLoosePids.get(rp.agentId) ?? [];
       arr.push(...tree);
@@ -596,10 +720,12 @@ export function collect(opts: { window?: number } = {}): Snapshot {
   // --- gateway (hors sous-arbres déjà attribués)
   let gatewayRes: Res = ZERO_RES;
   let gatewayUptime: number | null = null;
+  let gatewayOwn: number[] = [];
   if (gatewayPid !== null) {
     const tree = descendants(gatewayPid, kids, new Set([...runtimeRoots, ...(browserRoot ? [browserRoot] : [])]));
     const own = tree.filter((pid) => !claimed.has(pid));
     for (const pid of own) claimed.add(pid);
+    gatewayOwn = own;
     gatewayRes = res(own, procs);
     const gp = procs.get(gatewayPid);
     gatewayUptime = gp ? Math.round((Date.now() - gp.startedAt) / 1000) : null;
@@ -699,6 +825,19 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       return u;
     };
     /**
+     * Jetons du tour en cours : les appels du `.jsonl` postérieurs à l'ouverture du tour.
+     *
+     * Délibérément hors de `tokenByOrigin` : le tour est un sous-ensemble de sa session,
+     * l'ajouter ferait compter deux fois la même consommation au niveau de l'agent. Pas
+     * de repli sur la base OpenClaw non plus — elle n'écrit qu'à la fin du tour, elle ne
+     * peut donc rien dire d'un tour en cours : tiret plutôt que zéro.
+     */
+    const turnTokensFor = (key: string, since: number | null): TokenUsage | null => {
+      if (since === null) return null;
+      const cli = cliByKey.get(key);
+      return cli ? readSessionTokensSince(cli, since) : null;
+    };
+    /**
      * Tâches d'une session, avec report des jetons sur la tâche quand — et seulement
      * quand — la correspondance est exacte.
      *
@@ -732,7 +871,18 @@ export function collect(opts: { window?: number } = {}): Snapshot {
           const usage = tokensFor(s.child_session_key, metas.get(s.child_session_key)?.sessionId ?? null);
           const tasks = taskNodes(tasksBySession.get(s.child_session_key) ?? [], r, usage);
           if (live && !tasks.some((t) => t.state === 'running')) {
-            tasks.unshift(liveTurnNode(s.child_session_key, s.task, detailText(s.task), pids, r, procs));
+            const since = turnStartedAt(windowStartByKey.get(s.child_session_key) ?? null, pids, procs);
+            tasks.unshift(
+              liveTurnNode(
+                s.child_session_key,
+                s.task,
+                detailText(s.task),
+                pids,
+                r,
+                since,
+                turnTokensFor(s.child_session_key, since),
+              ),
+            );
           }
           return {
             key: s.child_session_key,
@@ -783,7 +933,10 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       const usage = tokensFor(key, meta?.sessionId ?? null);
       const tasks = taskNodes(tasksBySession.get(key) ?? [], r, usage);
       if (live && !tasks.some((t) => t.state === 'running')) {
-        tasks.unshift(liveTurnNode(key, tr.prompt, transcriptPrompt(tr), pids, r, procs));
+        const since = turnStartedAt(windowStartByKey.get(key) ?? null, pids, procs);
+        tasks.unshift(
+          liveTurnNode(key, tr.prompt, transcriptPrompt(tr), pids, r, since, turnTokensFor(key, since)),
+        );
       }
       const children = buildSubagents(key);
       const lastActivity =
@@ -1002,13 +1155,17 @@ export function collect(opts: { window?: number } = {}): Snapshot {
     walk(a.sessions);
   }
 
+  // accesseur synchrone : rend le dernier relevé connu, rafraîchit en arrière-plan
+  const plan = getPlanUsage();
   const snapshot: Snapshot = {
+    build: process.env.NEXT_PUBLIC_BUILD_ID ?? null,
     ts: now,
     collectMs: Date.now() - t0,
     host: {
       hostname: os.hostname(),
       cores: os.cpus().length,
       cpuPct: getHostCpuPct(),
+      cpuTempC: readCpuTempC(),
       load,
       uptimeSec: Math.round(os.uptime()),
       ...mem,
@@ -1021,8 +1178,8 @@ export function collect(opts: { window?: number } = {}): Snapshot {
       port: gatewayPort,
       version: null,
     },
-    // accesseur synchrone : rend le dernier relevé connu, rafraîchit en arrière-plan
-    plan: getPlanUsage(),
+    plan,
+    modelUsage: getModelUsage(plan),
     agents,
     system: {
       browser: res(browserPids, procs),
@@ -1039,5 +1196,14 @@ export function collect(opts: { window?: number } = {}): Snapshot {
     warnings,
   };
 
-  return REDACT ? redactSnapshot(snapshot) : snapshot;
+  const graph = buildGraph({
+    now,
+    agents,
+    procs,
+    gateway: { pid: gatewayPid, ownPids: gatewayOwn, res: gatewayRes, port: gatewayPort, uptimeSec: gatewayUptime },
+    browserPids,
+    runtimes: graphRuntimes,
+    looseByAgent: agentLoosePids,
+  });
+  return { snapshot: REDACT ? redactSnapshot(snapshot) : snapshot, graph };
 }

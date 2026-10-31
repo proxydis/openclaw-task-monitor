@@ -56,6 +56,19 @@ const BYTES_PER_CYCLE = 8 * 1024 * 1024;
  */
 const MAX_IDS = 128;
 
+/**
+ * Relevés horodatés conservés par fichier, pour la somme « depuis l'ouverture du tour ».
+ *
+ * Dimensionné sur les données : sur les 60 plus gros transcripts locaux, découpés en
+ * tours (un tour = les appels API entre deux prompts utilisateur, doublons retirés),
+ * 198 tours donnent p50 = 23 appels, p90 = 204, p99 = 311, **max 388**. 512 couvre donc
+ * la totalité des tours observés avec de la marge. Le stockage est un `Float64Array`
+ * plat de 4 valeurs par entrée — 16 Ko par fichier, 6,4 Mo au pire avec `MAX_FILES`,
+ * ce que le service supporte avec `--max-old-space-size=320`. Un tour plus long que
+ * l'anneau ne rend pas un chiffre faux : la somme est marquée `approx`.
+ */
+const RING = 512;
+
 /** Fichiers suivis simultanément. Au-delà, les entrées les moins récemment lues sautent. */
 const MAX_FILES = 400;
 
@@ -186,6 +199,17 @@ type FileAcc = {
   total: { in: number; out: number; cache: number };
   seen: Set<string>;
   order: string[];
+  /**
+   * Anneau des `RING` derniers appels API retenus : 4 flottants par entrée
+   * (`tsMs`, `in`, `out`, `cache`). Alloué à la première ligne porteuse d'`usage`, pour
+   * ne rien coûter aux fichiers qui n'en ont pas. Rempli dans `consume()`, après la
+   * déduplication : une copie n'y entre pas plus qu'elle n'entre dans le total.
+   */
+  ring: Float64Array | null;
+  /** prochaine case d'écriture dans l'anneau */
+  ringAt: number;
+  /** entrées effectivement écrites, plafonné à `RING` */
+  ringLen: number;
   /** dernier accès, pour l'éviction LRU */
   at: number;
 };
@@ -201,6 +225,9 @@ function freshAcc(): FileAcc {
     total: { in: 0, out: 0, cache: 0 },
     seen: new Set(),
     order: [],
+    ring: null,
+    ringAt: 0,
+    ringLen: 0,
     at: Date.now(),
   };
 }
@@ -211,6 +238,9 @@ function resetAcc(acc: FileAcc): void {
   acc.total = { in: 0, out: 0, cache: 0 };
   acc.seen.clear();
   acc.order.length = 0;
+  acc.ring = null;
+  acc.ringAt = 0;
+  acc.ringLen = 0;
 }
 
 /** Éviction LRU : borne le nombre de fenêtres de déduplication gardées en mémoire. */
@@ -242,9 +272,27 @@ function consume(acc: FileAcc, line: Buffer): void {
       for (const old of acc.order.splice(0, MAX_IDS)) acc.seen.delete(old);
     }
   }
-  acc.total.in += num(u.input_tokens) + num(u.cache_creation_input_tokens);
-  acc.total.out += num(u.output_tokens);
-  acc.total.cache += num(u.cache_read_input_tokens);
+  const tin = num(u.input_tokens) + num(u.cache_creation_input_tokens);
+  const tout = num(u.output_tokens);
+  const tcache = num(u.cache_read_input_tokens);
+  acc.total.in += tin;
+  acc.total.out += tout;
+  acc.total.cache += tcache;
+
+  // horodatage de l'appel : champ `timestamp` à la racine de la ligne (ISO 8601), pas
+  // dans `message`. Vérifié présent sur les 12 109 lignes porteuses d'`usage` des 60
+  // plus gros transcripts locaux ; une ligne qui en manquerait n'entre pas dans
+  // l'anneau plutôt que d'y entrer datée de l'époque.
+  const ts = Date.parse(str(o.timestamp) ?? '');
+  if (!Number.isFinite(ts)) return;
+  const ring = acc.ring ?? (acc.ring = new Float64Array(RING * 4));
+  const p = acc.ringAt * 4;
+  ring[p] = ts;
+  ring[p + 1] = tin;
+  ring[p + 2] = tout;
+  ring[p + 3] = tcache;
+  acc.ringAt = acc.ringAt + 1 === RING ? 0 : acc.ringAt + 1;
+  if (acc.ringLen < RING) acc.ringLen++;
 }
 
 let budget = 0;
@@ -323,19 +371,83 @@ function snapshotOf(acc: FileAcc): TokenUsage {
 }
 
 /**
+ * Fichiers d'une session : son propre transcript d'abord, puis ceux des sous-agents
+ * qu'elle a lancés. `null` si aucun fichier ne porte cet identifiant.
+ */
+function sessionFiles(cliSessionId: string): string[] | null {
+  const idx = sessionIndex();
+  const file = idx.files.get(cliSessionId);
+  if (!file) return null;
+  return [file, ...subagentFiles(file, cliSessionId, idx)];
+}
+
+/**
  * Jetons d'une session du CLI Claude : son transcript plus ceux des sous-agents qu'elle
  * a lancés. `null` si aucun fichier ne porte cet identifiant (session purgée, ou trop
  * fraîche pour l'index — le cycle suivant la verra).
  */
 export function readSessionTokens(cliSessionId: string): TokenUsage | null {
-  const idx = sessionIndex();
-  const file = idx.files.get(cliSessionId);
-  if (!file) return null;
-  const own = scanFile(file);
+  const files = sessionFiles(cliSessionId);
+  if (!files) return null;
+  const own = scanFile(files[0]);
   if (!own) return null;
-  const subs = subagentFiles(file, cliSessionId, idx);
-  if (!subs.length) return own;
-  return sumTokens([own, ...subs.map(scanFile)]) ?? own;
+  if (files.length === 1) return own;
+  return sumTokens([own, ...files.slice(1).map(scanFile)]) ?? own;
+}
+
+/**
+ * Somme des seuls appels API postérieurs à `sinceMs`, lue dans l'anneau du fichier.
+ *
+ * Le total d'une session est un cumul depuis son premier tour ; le reporter sur la ligne
+ * « tour en cours » ferait lire le coût de la session comme celui du tour. D'où cette
+ * lecture bornée dans le temps, qui ne relit ni ne reparse rien : l'anneau a été rempli
+ * par `consume()` lors du balayage incrémental du même cycle.
+ *
+ * Le résultat est marqué `approx` — l'interface le préfixe alors d'un `~` — quand il ne
+ * peut pas être exhaustif :
+ *
+ *  - rattrapage du fichier encore en cours (`offset < size`), comme pour le total ;
+ *  - **anneau débordé** : l'anneau est plein et son plus ancien relevé est postérieur à
+ *    `sinceMs`, donc des appels du tour ont été évincés. Le choix est de rendre la somme
+ *    partielle marquée plutôt que `null` : sur un tour très long, un minorant visible et
+ *    signalé comme tel reste la lecture temps réel demandée, là où un tiret ferait
+ *    disparaître l'information au moment précis où elle est la plus utile. Le cas est en
+ *    outre hors de la plage mesurée (max 388 appels par tour pour `RING` = 512).
+ */
+function sinceOf(acc: FileAcc, sinceMs: number): TokenUsage {
+  const u: TokenUsage = { in: 0, out: 0, cache: 0 };
+  const ring = acc.ring;
+  if (ring && acc.ringLen) {
+    const first = (acc.ringAt - acc.ringLen + RING) % RING;
+    for (let k = 0; k < acc.ringLen; k++) {
+      const i = first + k;
+      const p = (i < RING ? i : i - RING) * 4;
+      if (ring[p] < sinceMs) continue;
+      u.in += ring[p + 1];
+      u.out += ring[p + 2];
+      u.cache += ring[p + 3];
+    }
+    if (acc.ringLen >= RING && ring[first * 4] > sinceMs) u.approx = true;
+  }
+  if (acc.offset < acc.size) u.approx = true;
+  return u;
+}
+
+/**
+ * Jetons d'une session consommés **depuis `sinceMs`** — sous-agents compris, comme pour
+ * le total. `null` si la session n'a aucun transcript lisible, ou si aucun de ses
+ * fichiers n'a encore été balayé : un tiret, jamais un zéro trompeur.
+ *
+ * À n'additionner à rien : c'est un sous-ensemble du total rendu par
+ * `readSessionTokens()` pour la même session, pas une consommation supplémentaire.
+ */
+export function readSessionTokensSince(cliSessionId: string, sinceMs: number): TokenUsage | null {
+  const files = sessionFiles(cliSessionId);
+  if (!files) return null;
+  return sumTokens(files.map((f) => {
+    const acc = accs.get(f);
+    return acc ? sinceOf(acc, sinceMs) : null;
+  }));
 }
 
 // ------------------------------------------------------------------ repli SQLite

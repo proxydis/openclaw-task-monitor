@@ -263,6 +263,72 @@ export function readCliSessionKeyIndex(agentIds: string[]): Map<string, string> 
   return data;
 }
 
+// ------------------------------------------------------- tours en cours (session_windows)
+
+/** Tour ouvert sur une session : la gateway écrit la ligne au *démarrage* du tour. */
+export type RunningWindow = {
+  sessionKey: string;
+  sessionId: string | null;
+  startedAt: number | null;
+  updatedAt: number | null;
+};
+
+const winCache = new Map<string, { sig: string; data: RunningWindow[] }>();
+
+/**
+ * Tours en cours d'un agent, lus dans `session_windows`.
+ *
+ * C'est la seule source qui existe *pendant* le tour. `session_nodes.cliSessionIds`,
+ * seul chemin utilisé jusqu'ici pour relier un process `claude` à sa session, n'est
+ * écrit qu'à la fin du tour : tant qu'il manque, le travail en cours était invisible —
+ * l'agent s'allumait en « active » avec sa RAM, mais sans aucune session ni tâche
+ * en dessous. `session_windows` est écrit dès l'ouverture du tour, donc dès la
+ * première seconde d'une session neuve.
+ */
+export function readRunningWindows(agentId: string): RunningWindow[] {
+  const dbFile = agentDbPath(agentId);
+  if (!fs.existsSync(dbFile)) return [];
+  let db: DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbFile, { readOnly: true });
+    const head = db.prepare('select max(updated_at) as mx, count(*) as n from session_windows').get() as any;
+    const sig = `${head?.mx ?? 0}:${head?.n ?? 0}`;
+    const hit = winCache.get(agentId);
+    if (hit && hit.sig === sig) return hit.data;
+
+    // OpenClaw >= 2026.10 laisse `status` à NULL tant que la fenêtre est ouverte (il ne prend
+    // une valeur qu'à la clôture) : « ouverte » = `ended_at` NULL, `running` n'existe plus.
+    const rows = db
+      .prepare(
+        "select session_key, session_id, started_at, updated_at from session_windows" +
+          " where ended_at is null and (status is null or status = 'running')" +
+          " order by coalesce(updated_at, started_at) desc",
+      )
+      .all() as unknown as {
+      session_key: string;
+      session_id: string | null;
+      started_at: number | null;
+      updated_at: number | null;
+    }[];
+    const data: RunningWindow[] = rows.map((r) => ({
+      sessionKey: r.session_key,
+      sessionId: r.session_id ?? null,
+      startedAt: r.started_at ?? null,
+      updatedAt: r.updated_at ?? null,
+    }));
+    winCache.set(agentId, { sig, data });
+    return data;
+  } catch {
+    return [];
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* noop */
+    }
+  }
+}
+
 export type Transcript = {
   prompt: string | null;
   /** longueur du texte nettoyé *avant* coupe : permet d'annoncer ce qui manque */
