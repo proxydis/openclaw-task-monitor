@@ -1059,7 +1059,7 @@ function DashboardInner() {
   const [selRef, setSelRef] = useState<SelRef | null>(null);
   const [tab, setTab] = useState<'tree' | 'procs' | 'work'>('tree');
   const [q, setQ] = useState('');
-  const [runningOnly, setRunningOnly] = useState(false);
+  const [runningOnly, setRunningOnly] = useState(true);
   const [showIdle, setShowIdle] = useState(true);
   const [showDone, setShowDone] = useState(true);
   const bootstrapped = useRef(false);
