@@ -1079,7 +1079,7 @@ function DashboardInner() {
   const [expandAll, setExpandAll] = useState(false);
   const openRef = useRef(open);
   const [selRef, setSelRef] = useState<SelRef | null>(null);
-  const [tab, setTab] = useState<'tree' | 'procs' | 'work' | 'graph'>('tree');
+  const [tab, setTab] = useState<'tree' | 'procs' | 'work' | 'graph'>('graph');
   const [graphSel, setGraphSel] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [runningOnly, setRunningOnly] = useState(true);
