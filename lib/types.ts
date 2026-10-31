@@ -304,6 +304,8 @@ export type GraphNode = {
   model: string | null;
   /** niveau d'effort (`--effort` du CLI), `null` quand aucun process ne le porte */
   effort: string | null;
+  /** d'où vient l'effort : drapeau du process (`cli`), dernier connu, configuration, défaut du CLI */
+  effortSrc?: 'cli' | 'last' | 'config' | 'default' | null;
   activity: GraphActivity;
   /** jetons depuis la création de la session ; `null` : rien de mesurable (tiret, pas zéro) */
   usage: TokenUsage | null;
