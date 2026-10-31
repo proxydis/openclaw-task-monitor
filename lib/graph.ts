@@ -127,7 +127,7 @@ function resolveEfforts(nodes: GraphNode[]): void {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const llm = (n: GraphNode) => n.kind === 'agent' || n.kind === 'session' || n.kind === 'subagent';
   for (const n of nodes) {
-    if (n.effort) {
+    if (n.effort && n.effortSrc !== 'default') {
       n.effortSrc = 'cli';
       if (last.get(n.id) !== n.effort) {
         last.delete(n.id);
