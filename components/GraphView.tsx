@@ -269,7 +269,7 @@ function Card({
   const { lang, t, m } = useI18n();
   const n = p.n;
   const title = cardTitle(n.kind === 'agent' ? String(n.label) : m(n.label));
-  const modelBits = [n.model ? n.model.split('/').pop() : null, n.effort].filter(Boolean).join(' · ');
+  const modelBits = [n.model ? n.model.split('/').pop() : null, n.effort ? (n.effortSrc && n.effortSrc !== 'cli' ? `${n.effort}*` : n.effort) : null].filter(Boolean).join(' · ');
   const sub = modelBits || (n.sub ? m(n.sub) : '');
   const tok = totalTokens(n.turnUsage ?? n.usage);
   const tokMark = (n.turnUsage ?? n.usage)?.approx ? '~' : '';
@@ -695,7 +695,9 @@ export function GraphDetail({
           <dt>{t('f.model')}</dt>
           <dd>{node.model ?? '—'}</dd>
           <dt>{t('graph.f.effort')}</dt>
-          <dd>{node.effort ?? '—'}</dd>
+          <dd>
+            {node.effort ? (node.effortSrc && node.effortSrc !== 'cli' ? `${node.effort} · ${t(`graph.effortSrc.${node.effortSrc}`)}` : node.effort) : '—'}
+          </dd>
           {lineage.length ? (
             <>
               <dt>{t('graph.f.launchedBy')}</dt>

@@ -1,8 +1,9 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { claudeProjectsDir } from './claude-cli';
 import { unitOfPid, type RawProc } from './procs';
-import { REDACT } from './store';
+import { OC_HOME, REDACT } from './store';
 import { readSessionTokens, sumTokens } from './token-usage';
 import type {
   AgentNode,
@@ -65,6 +66,101 @@ export function effortOfCmd(cmd: string): string | null {
 
 function modelOfCmd(cmd: string): string | null {
   return cmd.match(/--model[\s=]+(\S+)/)?.[1] ?? null;
+}
+
+// ---------------------------------------------------------------- niveau d'effort
+
+type EffortSrc = NonNullable<GraphNode['effortSrc']>;
+const EFFORT_FILE = path.join(
+  process.env.MONITOR_STATE_DIR || path.join(os.homedir(), '.cache', 'openclaw-monitor'),
+  'effort.json',
+);
+const EFFORT_MAX = 2000;
+let lastEffort: Map<string, string> | null = null;
+let effortDirty = false;
+
+function loadLastEffort(): Map<string, string> {
+  if (lastEffort) return lastEffort;
+  lastEffort = new Map();
+  try {
+    for (const [k, v] of Object.entries<any>(JSON.parse(fs.readFileSync(EFFORT_FILE, 'utf8')))) {
+      if (typeof v === 'string') lastEffort.set(k, v);
+    }
+  } catch {
+    /* premier lancement */
+  }
+  return lastEffort;
+}
+
+function saveLastEffort(): void {
+  if (!effortDirty || !lastEffort) return;
+  effortDirty = false;
+  try {
+    while (lastEffort.size > EFFORT_MAX) lastEffort.delete(lastEffort.keys().next().value as string);
+    fs.mkdirSync(path.dirname(EFFORT_FILE), { recursive: true });
+    fs.writeFileSync(EFFORT_FILE, JSON.stringify(Object.fromEntries(lastEffort)));
+  } catch {
+    /* le repli est un confort, jamais une cause d'échec */
+  }
+}
+
+/** Effort fixé dans la configuration (`agents.entries.<id>.models.<modèle>.params.thinking`). */
+function configuredEffort(agentId: string, model: string | null): string | null {
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(OC_HOME, 'openclaw.json'), 'utf8'));
+    const a = raw?.agents?.entries?.[agentId] ?? (raw?.agents?.list ?? []).find((x: any) => x?.id === agentId);
+    const t = (model && a?.models?.[model]?.params?.thinking) || a?.params?.thinking;
+    return typeof t === 'string' && t ? t : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Complète l'effort des nœuds qui n'en portent pas : un process `claude` vivant le dit
+ * (`--effort`), mais une session au repos n'a plus de process, et un job `claude --print`
+ * lancé sans drapeau tourne au défaut du CLI. Ordre : explicite, dernier connu, configuration,
+ * parent (un sous-agent hérite de son lanceur), défaut du CLI.
+ */
+function resolveEfforts(nodes: GraphNode[]): void {
+  const last = loadLastEffort();
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const llm = (n: GraphNode) => n.kind === 'agent' || n.kind === 'session' || n.kind === 'subagent';
+  for (const n of nodes) {
+    if (n.effort) {
+      n.effortSrc = 'cli';
+      if (last.get(n.id) !== n.effort) {
+        last.delete(n.id);
+        last.set(n.id, n.effort);
+        effortDirty = true;
+      }
+    }
+  }
+  // du parent vers l'enfant : l'ordre d'insertion place toujours le lanceur avant le lancé
+  for (const n of nodes) {
+    if (n.effort) continue;
+    const remembered = last.get(n.id);
+    if (remembered && (llm(n) || n.kind === 'systemd' || n.kind === 'detached' || n.kind === 'cron')) {
+      n.effort = remembered;
+      n.effortSrc = 'last';
+      continue;
+    }
+    if (n.kind === 'agent' || n.role === 'agent') {
+      const agentId = n.id.startsWith('a:') ? n.id.slice(2) : null;
+      const cfg = agentId ? configuredEffort(agentId, n.model) : null;
+      if (cfg) {
+        n.effort = cfg;
+        n.effortSrc = 'config';
+        continue;
+      }
+    }
+    const parent = n.parent ? byId.get(n.parent) : undefined;
+    if ((n.kind === 'session' || n.kind === 'subagent') && parent?.effort) {
+      n.effort = parent.effort;
+      n.effortSrc = parent.effortSrc === 'cli' ? 'last' : parent.effortSrc;
+    }
+  }
+  saveLastEffort();
 }
 
 const CMD_MAX = 320;
@@ -276,7 +372,8 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       startedAt: t.startedAt ?? t.createdAt,
       endedAt: t.endedAt,
       model: claude ? modelOfCmd(claude.cmd) : null,
-      effort: claude ? effortOfCmd(claude.cmd) : null,
+      effort: claude ? (effortOfCmd(claude.cmd) ?? 'default') : null,
+      effortSrc: claude && !effortOfCmd(claude.cmd) ? 'default' : undefined,
       activity: activityOfTask(t, kind === 'cron' ? 'job' : 'command'),
       usage: live ? jobTokens(t.pids ?? [], procs, now) : null,
       turnUsage: null,
@@ -470,6 +567,8 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       note: null,
     });
   }
+
+  resolveEfforts(nodes);
 
   if (REDACT) {
     let n = 0;
