@@ -780,7 +780,15 @@ function FactRow({ k, v, fmt }: { k: string; v: string; fmt?: GraphNode['facts']
   const { lang, t } = useI18n();
   const n = Number(v);
   const shown =
-    fmt && Number.isFinite(n) ? (fmt === 'mb' ? mb(lang, n) : fmt === 'dur' ? dur(lang, n) : clock(lang, n)) : v;
+    fmt === 'ciState'
+      ? t(`graph.ci.state.${v}`)
+      : fmt && Number.isFinite(n)
+        ? fmt === 'mb'
+          ? mb(lang, n)
+          : fmt === 'dur'
+            ? dur(lang, n)
+            : clock(lang, n)
+        : v;
   return (
     <>
       <dt>{t(k)}</dt>
