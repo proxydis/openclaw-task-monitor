@@ -304,7 +304,7 @@ function Card({
       </text>
       <line className="gv-sep" x1={16} x2={CARD_W - 16} y1={56} y2={56} />
       <text className="gv-meta" x={16} y={73}>
-        <tspan className="gv-tok">{tok === null ? '— tok' : `${tokMark}${tokens(lang, tok)} tok`}</tspan>
+        <tspan className="gv-tok">{tok === null ? `— ${t('graph.tokShort')}` : `${tokMark}${tokens(lang, tok)} ${t('graph.tokShort')}`}</tspan>
         <tspan dx={12}>{n.res.procs ? `${n.res.cpuPct.toFixed(0)}%` : '—'}</tspan>
         <tspan dx={12}>{n.res.procs ? mbShort(lang, n.res.rssMb) : '—'}</tspan>
         <tspan dx={12} className="gv-dim">
@@ -352,6 +352,9 @@ export function GraphView({
 }) {
   const { t, m, lang } = useI18n();
   const box = useRef<HTMLDivElement>(null);
+  const wrap = useRef<HTMLDivElement>(null);
+  /** plein écran : API native quand elle existe, sinon recouvrement CSS (iOS, iframe sans permission) */
+  const [full, setFull] = useState(false);
   const [size, setSize] = useState({ w: 800, h: 560 });
   const [view, setView] = useState<View>({ x: 24, y: 24, k: 1 });
   const touched = useRef(false);
@@ -394,6 +397,37 @@ export function GraphView({
     setSize({ w: el.clientWidth, h: el.clientHeight });
     return () => ro.disconnect();
   }, []);
+
+  useEffect(() => {
+    const onChange = () => {
+      // la sortie native (Échap, bouton du navigateur) referme aussi notre état
+      if (!document.fullscreenElement) setFull(false);
+    };
+    document.addEventListener('fullscreenchange', onChange);
+    return () => document.removeEventListener('fullscreenchange', onChange);
+  }, []);
+
+  // recouvrement CSS : le navigateur ne gère pas Échap à notre place
+  useEffect(() => {
+    if (!full || document.fullscreenElement) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFull(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [full]);
+
+  const toggleFull = useCallback(async () => {
+    const el = wrap.current;
+    if (!el) return;
+    if (full) {
+      setFull(false);
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      return;
+    }
+    setFull(true);
+    if (el.requestFullscreen) await el.requestFullscreen().catch(() => {});
+  }, [full]);
 
   const fit = useCallback(() => {
     const pad = 36;
@@ -452,7 +486,8 @@ export function GraphView({
   }, [nodes]);
 
   return (
-    <div className="gv-wrap">
+    <div ref={wrap} className={`gv-wrap${full ? ' full' : ''}`}>
+      <div className="gv-stage">
       <div className="gv-hud">
         <span className="gv-chip a">
           <b>{counts.agents}</b> {t('graph.hud.agents')}
@@ -484,7 +519,16 @@ export function GraphView({
           aria-label={t('graph.fit')}
           title={t('graph.fit')}
         >
-          ⤢
+          ◎
+        </button>
+        <button
+          type="button"
+          onClick={toggleFull}
+          aria-label={t(full ? 'graph.fullExit' : 'graph.full')}
+          aria-pressed={full}
+          title={t(full ? 'graph.fullExit' : 'graph.full')}
+        >
+          {full ? '⤡' : '⤢'}
         </button>
       </div>
       <div
@@ -567,6 +611,12 @@ export function GraphView({
           <span className="lg infra">{t('graph.role.infra')}</span>
         </div>
       </div>
+      </div>
+      {full ? (
+        <div className="gv-side">
+          <GraphDetail data={data} selId={selId} onSelect={onSelect} />
+        </div>
+      ) : null}
     </div>
   );
 }

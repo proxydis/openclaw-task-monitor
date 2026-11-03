@@ -213,6 +213,8 @@ button { font: inherit; color: inherit; }
   .tokens .tok.in::before { content: 'IN '; color: var(--txt-faint); }
   .tokens .tok.out::before { content: 'OUT '; color: var(--txt-faint); }
   .tokens .tok.cache::before { content: 'CACHE '; color: var(--txt-faint); }
+  :lang(fr) .tokens .tok.in::before { content: 'ENTRÉE '; }
+  :lang(fr) .tokens .tok.out::before { content: 'SORTIE '; }
   .row .metrics { gap: 8px; }
   .row .metric { min-width: 0; }
   .row .metric .bar { width: 24px; }
