@@ -1,6 +1,19 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import {
+  ciJobFacts,
+  ciJobSub,
+  ciLaneView,
+  ciLinks,
+  ciMemFacts,
+  ciPrView,
+  parseCiChain,
+  readCiRunners,
+  shortRepo,
+  type CiRunner,
+  type CiStep,
+} from './ci-local';
 import { claudeProjectsDir } from './claude-cli';
 import { unitOfPid, type RawProc } from './procs';
 import { OC_HOME, REDACT } from './store';
@@ -34,6 +47,11 @@ import { ZERO_RES } from './types';
  * un nœud de service (unité systemd `openclaw-*`) ou dans « autres process OpenClaw » —
  * jamais dans le vide. Le panneau de chaque nœud liste ses process sans seuil CPU/RAM,
  * contrairement à l'onglet Process qui ne garde que les plus gourmands.
+ *
+ * Seule exception à « aucune source nouvelle » : la CI locale du mini PC (`ci-local.ts`),
+ * runners `gh-runner-*` lus dans leur cgroup et fichiers d'état de leurs hooks. Leurs process
+ * suivent la même règle : le job d'une PR de lot va sous la voie FIN, tout le reste de l'unité
+ * dans le nœud du runner.
  */
 
 /** Process d'exécution agent (`claude`, `codex`, `gemini`) et ce qu'on en sait. */
@@ -179,7 +197,15 @@ type LaneInfo = {
   waiting: boolean;
   last: string;
 };
-type LotInfo = { prefix: string; logs: string; steps: Map<string, LotStep>; lanes: Map<string, LaneInfo>; trello: Map<string, string> };
+type LotInfo = {
+  prefix: string;
+  logs: string;
+  steps: Map<string, LotStep>;
+  lanes: Map<string, LaneInfo>;
+  trello: Map<string, string>;
+  /** étape CI qui suit la phase FIN (`ci_fin`), `null` tant qu'elle n'a pas commencé */
+  ci: CiStep | null;
+};
 
 const lotCache = new Map<string, { sig: string; info: LotInfo | null }>();
 
@@ -260,7 +286,7 @@ function readLot(lotDir: string, mode: string): LotInfo | null {
         x.waiting = true;
       }
     }
-    const info: LotInfo = { prefix, logs, steps, lanes, trello };
+    const info: LotInfo = { prefix, logs, steps, lanes, trello, ci: parseCiChain(text, prefix) };
     lotCache.set(chain, { sig, info });
     return info;
   } catch {
@@ -393,6 +419,12 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     return id;
   };
   const NONE: GraphActivity = { type: 'none', text: null };
+
+  // runners de la CI locale : lus avant les lots, dont les PR revendiquent le job en cours
+  const ciRunners = readCiRunners(procs);
+  const ciOwner = ciRunners.map((r) => r.repo?.split('/')[0]).find(Boolean) ?? 'proxydis';
+  /** runner → nœud de PR qui a pris son job (le nœud du runner n'y garde que son socle) */
+  const ciAttached = new Map<string, string>();
 
   // runtime vivant par session : le plus récent l'emporte
   const runtimeByKey = new Map<string, GraphRuntime>();
@@ -540,7 +572,9 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       const what = st
         ? `${info?.step} — ${st.repo} · ${st.branch}${st.card !== '-' ? ` · carte ${st.card}` : ''}`
         : (info?.last ?? '');
-      push({
+      // étape CI : la voie FIN reste en cours tant que le lanceur attend les verdicts des PR
+      const ci = ph === 'FIN' && info?.finished && !live && lot.ci ? ciLaneView(lot.ci) : null;
+      const laneId = push({
         id: `l:${t.id}:${ph}`,
         parent: parentId,
         role: 'subagent',
@@ -548,10 +582,10 @@ export function buildGraph(ctx: GraphCtx): GraphData {
         // la carte n'est dans le titre que pour une passe en cours : une voie finie ou en attente
         // porte encore l'étape précédente, la montrer en titre ferait croire qu'elle y travaille
         label: live && card ? { k: 'graph.laneCard', p: { ph, card } } : { k: 'graph.lane', p: { ph } },
-        sub: info?.finished && !live ? { k: 'graph.lane.done' } : info?.waiting && !live ? { k: 'graph.lane.waiting' } : what || null,
-        state,
+        sub: ci ? ci.sub : info?.finished && !live ? { k: 'graph.lane.done' } : info?.waiting && !live ? { k: 'graph.lane.waiting' } : what || null,
+        state: ci ? ci.state : state,
         startedAt: info?.firstTs ?? claude?.startedAt ?? null,
-        endedAt: live ? null : (info?.endTs ?? null),
+        endedAt: live ? null : ci ? ci.endedAt : (info?.endTs ?? null),
         model: null,
         effort: claude ? 'default' : null,
         effortSrc: claude ? 'default' : undefined,
@@ -561,10 +595,104 @@ export function buildGraph(ctx: GraphCtx): GraphData {
         res: live ? resOf(list) : ZERO_RES,
         procs: list,
         facts,
-        note: info?.failed ? `échecs :${info.failed}` : null,
-        noteIsError: !!info?.failed,
+        note: info?.failed ? `échecs :${info.failed}` : (ci?.note ?? null),
+        noteIsError: !!info?.failed || ci?.state === 'failed',
       });
+      if (ci && lot.ci) ciPrNodes(lot.ci, laneId);
     }
+  };
+
+  /** Un nœud par PR du lot sous la voie FIN, avec le job du runner qui la teste quand il tourne. */
+  const ciPrNodes = (step: CiStep, laneId: string): void => {
+    for (const p of step.prs) {
+      const v = ciPrView(p, step, ciRunners, now, ciOwner);
+      const runner = v.attached ? ciRunners.find((r) => r.name === v.attached) : undefined;
+      const list = runner ? procsOf(runner.jobPids) : [];
+      const facts: GraphNode['facts'] = [...v.facts];
+      if (runner) facts.push(...ciMemFacts(runner.mem));
+      const id = push({
+        id: `ci:${laneId}:${v.short}:${v.n}`,
+        parent: laneId,
+        role: 'job',
+        kind: 'ci',
+        label: { k: 'graph.ci.pr', p: { repo: v.short, n: v.n } },
+        sub: v.sub,
+        state: v.state,
+        startedAt: v.startedAt,
+        endedAt: v.endedAt,
+        model: null,
+        effort: null,
+        activity: v.job ? { type: 'job', text: REDACT ? null : `${v.job.repo} · ${v.job.job} · ${v.job.headRef || v.job.ref}` } : NONE,
+        usage: null,
+        turnUsage: null,
+        res: resOf(list),
+        procs: list,
+        facts,
+        note: v.note,
+        noteIsError: v.noteIsError,
+      });
+      if (runner) ciAttached.set(runner.name, id);
+    }
+  };
+
+  /**
+   * Un nœud par runner vivant. Son socle y reste toujours ; le job n'y figure que s'il n'est
+   * rattaché à aucune PR de lot (PR ouverte à la main, job refusé pendant les phases d'un lot).
+   */
+  const runnerNode = (r: CiRunner): void => {
+    const list = procsOf(r.pids.filter((pid) => !placed.has(pid)));
+    const cur = r.state;
+    const js = cur ? ciJobSub(cur, r.workerAlive) : null;
+    const lotPr = ciAttached.has(r.name);
+    const sub: Msg =
+      lotPr && cur
+        ? { k: 'graph.ci.runnerLot', p: { job: cur.job, repo: shortRepo(cur.repo), n: cur.pr ?? '?' } }
+        : js?.live
+          ? js.sub
+          : r.workerAlive
+            ? { k: 'graph.ci.runnerBusy' }
+            : { k: 'graph.ci.runnerFree' };
+    const last = r.last;
+    const facts: GraphNode['facts'] = [
+      { k: 'graph.f.unit', v: r.unit },
+      { k: 'graph.f.runner', v: r.name },
+    ];
+    if (r.repo) facts.push({ k: 'graph.f.repo', v: `https://github.com/${r.repo}` });
+    if (r.dir) facts.push({ k: 'graph.f.workspace', v: r.dir });
+    facts.push(...ciMemFacts(r.mem));
+    if (last) {
+      const target = last.pr !== null ? `PR #${last.pr}` : last.headRef || last.ref;
+      facts.push({ k: js?.live ? 'graph.f.ciCurrent' : 'graph.f.ciLast', v: `${last.job} · ${target} · ${last.state}` });
+      facts.push(...ciJobFacts(last, now), ...ciLinks(last.repo, last.pr, last, last.runId));
+    }
+    const root = list.find((p) => !list.some((q) => q.pid === p.ppid));
+    push({
+      id: `ci:runner:${r.unit}`,
+      parent: 'gw',
+      role: 'infra',
+      kind: 'runner',
+      label: { k: 'graph.ci.runner', p: { name: r.name } },
+      sub,
+      // un runner qui exécute un job (le sien ou celui d'une PR de lot) est en cours, au repos sinon
+      state: r.workerAlive ? 'running' : 'idle',
+      startedAt: js?.live ? (cur?.startedAt ?? cur?.queuedAt ?? r.startedAt) : r.startedAt,
+      endedAt: null,
+      model: null,
+      effort: null,
+      activity:
+        cur && r.workerAlive
+          ? { type: 'job', text: REDACT ? null : `${cur.repo}${cur.pr !== null ? ` #${cur.pr}` : ''} · ${cur.job} · ${cur.headRef || cur.ref}` }
+          : root
+            ? { type: 'command', text: REDACT ? null : root.cmd }
+            : NONE,
+      usage: null,
+      turnUsage: null,
+      res: resOf(list),
+      procs: list,
+      facts,
+      note: js?.interrupted ? { k: 'graph.ci.job.interruptedNote', p: { job: cur!.job, runner: r.name } } : null,
+      noteIsError: !!js?.interrupted,
+    });
   };
 
   const jobNode = (t: TaskNode, agent: AgentNode): void => {
@@ -727,6 +855,9 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     }
   }
 
+  // --- runners de la CI locale, après les lots : le job d'une PR de lot est déjà rangé sous sa voie FIN
+  for (const r of ciRunners) runnerNode(r);
+
   // --- tout le reste d'OpenClaw : services systemd `openclaw-*`, puis process isolés
   const services = new Map<string, number[]>();
   const strays: number[] = [];
@@ -795,7 +926,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
   if (REDACT) {
     let n = 0;
     for (const g of nodes) {
-      if (g.kind === 'session' || g.kind === 'subagent' || g.kind === 'lane' || g.kind === 'systemd' || g.kind === 'detached' || g.kind === 'cron') {
+      if (g.kind === 'session' || g.kind === 'subagent' || g.kind === 'lane' || g.kind === 'ci' || g.kind === 'runner' || g.kind === 'systemd' || g.kind === 'detached' || g.kind === 'cron') {
         n++;
         g.label = { k: g.kind === 'subagent' ? 'redact.subagent' : 'redact.session', p: { n } };
         g.sub = null;
