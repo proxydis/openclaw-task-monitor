@@ -76,9 +76,11 @@ const KIND_RANK: Record<GraphNode['kind'], number> = {
   subagent: 3,
   lane: 4,
   systemd: 4,
+  ci: 5,
   detached: 5,
   cron: 6,
   browser: 7,
+  runner: 8,
   service: 8,
   other: 9,
 };
@@ -106,6 +108,7 @@ function layout(nodes: GraphNode[]): { placed: Map<string, Placed>; edges: Edge[
         Number(a.id.startsWith('cluster:')) - Number(b.id.startsWith('cluster:')) ||
         KIND_RANK[a.kind] - KIND_RANK[b.kind] ||
         (a.kind === 'agent' || a.kind === 'service' ? String(a.label).localeCompare(String(b.label)) : 0) ||
+        (a.kind === 'runner' || a.kind === 'ci' ? a.id.localeCompare(b.id) : 0) ||
         (a.startedAt ?? 0) - (b.startedAt ?? 0) ||
         a.id.localeCompare(b.id),
     );
@@ -275,9 +278,11 @@ function Card({
   const sub = n.kind === 'lane' ? (n.sub ? m(n.sub) : '') || modelBits : modelBits || (n.sub ? m(n.sub) : '');
   const tok = totalTokens(n.turnUsage ?? n.usage);
   const tokMark = (n.turnUsage ?? n.usage)?.approx ? '~' : '';
+  // CI locale : étiquette « CI » à la place du rôle, plus courte, qui laisse la place au nom du runner
+  const ci = n.kind === 'ci' || n.kind === 'runner';
   return (
     <g
-      className={`gv-node ${n.role} ${n.state}${selected ? ' sel' : ''}${dim ? ' dim' : ''}`}
+      className={`gv-node ${n.role} ${n.state} k-${n.kind}${selected ? ' sel' : ''}${dim ? ' dim' : ''}`}
       style={{ transform: `translate(${p.x}px, ${p.y}px)` }}
       onClick={(e) => {
         e.stopPropagation();
@@ -289,10 +294,10 @@ function Card({
       <rect className="gv-bar" x={0} y={10} width={3.5} height={CARD_H - 20} rx={2} />
       <circle className="gv-dot" cx={22} cy={23} r={5} />
       <text className="gv-title" x={36} y={27}>
-        {clip(title, 21)}
+        {clip(title, ci ? 27 : 21)}
       </text>
       <text className="gv-role" x={CARD_W - 12} y={26} textAnchor="end">
-        {t(ROLE_KEY[n.role])}
+        {ci ? t('graph.role.ci') : t(ROLE_KEY[n.role])}
       </text>
       <text className="gv-sub" x={16} y={46}>
         {clip(sub, 40)}
@@ -722,7 +727,7 @@ export function GraphDetail({
           <TokenRows usage={node.usage} label={running ? t('graph.f.tokensLive') : t('f.tokens')} />
           {node.turnUsage ? <TokenRows usage={node.turnUsage} label={t('graph.f.tokensTurn')} /> : null}
           {node.facts.map((f) => (
-            <FactRow key={`${f.k}:${f.v}`} k={f.k} v={f.v} />
+            <FactRow key={`${f.k}:${f.v}`} k={f.k} v={f.v} fmt={f.fmt} />
           ))}
         </dl>
 
@@ -768,18 +773,24 @@ function clipTitle(n: GraphNode, m: (x: GraphNode['label']) => string): string {
   return clip(n.kind === 'agent' ? String(n.label) : m(n.label), 34);
 }
 
-function FactRow({ k, v }: { k: string; v: string }) {
-  const { t } = useI18n();
+/** Hôtes dont les liens sont cliquables dans le panneau : pages ouvrables depuis n'importe quel poste. */
+const LINK_HOSTS = /^https:\/\/(trello\.com|github\.com)\/[^\s"<>]*$/;
+
+function FactRow({ k, v, fmt }: { k: string; v: string; fmt?: GraphNode['facts'][number]['fmt'] }) {
+  const { lang, t } = useI18n();
+  const n = Number(v);
+  const shown =
+    fmt && Number.isFinite(n) ? (fmt === 'mb' ? mb(lang, n) : fmt === 'dur' ? dur(lang, n) : clock(lang, n)) : v;
   return (
     <>
       <dt>{t(k)}</dt>
       <dd>
-        {/^https:\/\/trello\.com\//.test(v) ? (
+        {LINK_HOSTS.test(v) ? (
           <a href={v} target="_blank" rel="noreferrer noopener">
             {v.replace('https://', '')}
           </a>
         ) : (
-          v
+          shown
         )}
       </dd>
     </>
