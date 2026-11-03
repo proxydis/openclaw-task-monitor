@@ -7,6 +7,23 @@
   --c-infra: #2dd4bf;
 }
 
+.gv-stage { position: relative; min-width: 0; }
+
+/* plein écran (API native ou recouvrement CSS) : le graph prend tout l'écran, détail du nœud à droite */
+.gv-wrap.full {
+  display: flex;
+  width: 100%; height: 100%;
+  background: #070a10;
+}
+.gv-wrap.full:not(:fullscreen) { position: fixed; inset: 0; z-index: 1000; }
+.gv-wrap.full .gv-stage { flex: 1; }
+.gv-wrap.full .gv { height: 100%; border-radius: 0; }
+.gv-side {
+  flex: 0 0 min(380px, 38vw); overflow: auto; padding: 10px;
+  border-left: 1px solid var(--line); background: var(--bg, #0a0d13);
+}
+.gv-side .detail { position: static; }
+
 .gv {
   position: relative;
   height: clamp(480px, 74vh, 880px);
@@ -150,6 +167,8 @@
 @media (max-width: 720px) {
   .gv { height: 62vh; }
   .gv-legend { display: none; }
+  .gv-wrap.full { flex-direction: column; }
+  .gv-side { flex: 0 0 40%; border-left: 0; border-top: 1px solid var(--line); }
 }
 @media (prefers-reduced-motion: reduce) {
   .gv-edge.running, .gv-node.running .gv-dot, .gv-node.running .gv-halo { animation: none; }
