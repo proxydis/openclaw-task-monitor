@@ -121,6 +121,8 @@ Every setting goes through environment variables.
 | `MONITOR_REDACT` | — | `1` masks all business content (see below) |
 | `MONITOR_PLAN_USAGE` | — | `0` disables the Anthropic plan-usage card (no network call) and its *By model* tab (no transcript scan) |
 | `MONITOR_PLAN_TTL_MS` | `600000` | polling interval of the usage endpoint; the API grants about one call every 5 min, going lower gets the account rate-limited |
+| `MONITOR_CI_STATE_DIR` | `~/ci-runner/etat` | state files written by the local CI runner hooks (`<runner>.json`, `historique.jsonl`), see *Local CI jobs* |
+| `MONITOR_CI_UNIT_RE` | `^gh-runner-[\w.-]+\.service$` | systemd `--user` units treated as self-hosted GitHub Actions runners |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | where the Claude Code OAuth token is read from (read-only) |
 
 With systemd, edit the generated unit then reload:
@@ -160,6 +162,29 @@ mapping. The whole process subtree — MCP servers, shells, tools — is account
 session. Failing that, the process `cwd` is compared to the declared workspaces to at least
 attach the agent. The rest of the gateway subtree is accounted as “gateway”, Chrome as
 “browser”.
+
+### Local CI jobs (self-hosted runners)
+
+When the GitHub Actions runners of a batch run on this machine (`gh-runner-*.service` user
+units), the Graph view shows them without any network call:
+
+- **One node per live runner** under the gateway (“Local CI · geekom-back”): free or busy,
+  its processes, the memory of its cgroup (`memory.current`, `memory.swap.current`,
+  `memory.peak`, number of `memory.high` events, limits) and its last known job with links.
+- **During the CI step of a `run-lot.sh` batch** (after `##### phase FIN terminée`), the FIN
+  lane stays running with “CI of the batch PRs · 1/2 verdicts”, and gets one child node per PR
+  (“CI back #276”): waiting for the other CI job, for a slot or for memory, running on which
+  runner and slot, verdict, red jobs, conflict, refusal. The `Runner.Worker` subtree of the job
+  (and the `sleep` holding the slot) is accounted on the PR node; the runner base processes
+  stay on the runner node.
+- **Clickable GitHub links** (job, run, PR, PR checks): they open from any machine of the
+  network, the monitor itself never calls GitHub.
+
+Sources: the batch chain log (`CI : …` lines written by `ci_fin`), the runner hook state files
+(`MONITOR_CI_STATE_DIR`), `.runner` in the runner install directory, and the unit cgroup under
+`/sys/fs/cgroup/user.slice/user-<uid>.slice/user@<uid>.service/app.slice/`. A state file
+saying “queued” or “running” while the runner has no `Runner.Worker` process is shown as an
+interrupted job. `node scripts/verif-ci-local.mts` checks the parsing offline.
 
 ### Running tasks
 

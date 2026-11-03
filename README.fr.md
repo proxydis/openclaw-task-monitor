@@ -123,6 +123,8 @@ Tout se règle par variables d'environnement.
 | `MONITOR_REDACT` | — | `1` masque tout contenu métier (voir ci-dessous) |
 | `MONITOR_PLAN_USAGE` | — | `0` désactive la carte des limites de forfait (aucun appel réseau) et son onglet *Par modèle* (aucune lecture des transcripts) |
 | `MONITOR_PLAN_TTL_MS` | `600000` | période d'interrogation du relevé d'usage ; l'API n'accorde qu'environ un appel toutes les 5 min, descendre plus bas fait limiter le compte |
+| `MONITOR_CI_STATE_DIR` | `~/ci-runner/etat` | fichiers d'état tenus par les hooks des runners de la CI locale (`<runner>.json`, `historique.jsonl`), voir *Jobs CI du mini PC* |
+| `MONITOR_CI_UNIT_RE` | `^gh-runner-[\w.-]+\.service$` | unités systemd `--user` traitées comme des runners GitHub Actions auto-hébergés |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | emplacement du jeton OAuth Claude Code (lecture seule) |
 
 Avec systemd, éditer l'unité générée puis recharger :
@@ -163,6 +165,30 @@ session. Tout le sous-arbre du process — serveurs MCP, shells, outils — est 
 cette session. À défaut, le `cwd` du process est comparé aux workspaces déclarés pour
 rattacher au moins l'agent. Le reste du sous-arbre de la gateway est comptabilisé comme
 « gateway », Chrome comme « navigateur ».
+
+### Jobs CI du mini PC (runners auto-hébergés)
+
+Quand les runners GitHub Actions d'un lot tournent sur la machine (unités utilisateur
+`gh-runner-*.service`), la vue Graph les montre, sans aucun appel réseau :
+
+- **Un nœud par runner vivant** sous la gateway (« CI locale · geekom-back ») : libre ou
+  occupé, ses process, la mémoire de son cgroup (`memory.current`, `memory.swap.current`,
+  `memory.peak`, nombre d'événements `memory.high`, bornes) et son dernier job connu, avec liens.
+- **Pendant l'étape CI d'un lot `run-lot.sh`** (après `##### phase FIN terminée`), la voie FIN
+  reste en cours, « CI des PR du lot · 1/2 verdicts », avec un nœud par PR (« CI back #276 ») :
+  en attente de l'autre job de CI, d'un créneau ou de mémoire, en cours sur quel runner et quel
+  créneau, verdict, jobs rouges, conflit, refus. Le sous-arbre `Runner.Worker` du job (et le
+  `sleep` qui tient le créneau) est compté dans le nœud de la PR ; le socle du runner reste dans
+  le nœud du runner.
+- **Liens GitHub cliquables** (job, run, PR, vérifications de la PR) : ils s'ouvrent depuis
+  n'importe quel poste du réseau, le monitor n'appelle jamais GitHub.
+
+Sources : le journal de chaîne du lot (lignes `CI : …` de `ci_fin`), les fichiers d'état des
+hooks du runner (`MONITOR_CI_STATE_DIR`), le `.runner` du répertoire d'installation, et le
+cgroup de l'unité sous `/sys/fs/cgroup/user.slice/user-<uid>.slice/user@<uid>.service/app.slice/`.
+Une fiche « en attente » ou « en cours » alors que le runner n'a plus de process `Runner.Worker`
+est affichée comme un job interrompu. `node scripts/verif-ci-local.mts` vérifie l'analyse hors
+serveur.
 
 ### Tâches en cours
 

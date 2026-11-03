@@ -32,11 +32,18 @@ export function LangProvider({ children }: { children: React.ReactNode }) {
     } catch {
       /* localStorage indisponible (mode privé, iframe) */
     }
-    if (isLang(stored)) setLangState(stored);
+    if (isLang(stored)) {
+      setLangState(stored);
+      return;
+    }
+    // aucune préférence enregistrée : on suit la langue du navigateur
+    const nav = (window.navigator.languages?.[0] ?? window.navigator.language ?? '').slice(0, 2).toLowerCase();
+    if (isLang(nav)) setLangState(nav);
   }, []);
 
   useEffect(() => {
     document.documentElement.lang = lang;
+    document.documentElement.translate = false;
   }, [lang]);
 
   const setLang = useCallback((l: Lang) => {

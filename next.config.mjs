@@ -9,7 +9,15 @@ const here = path.dirname(fileURLToPath(import.meta.url));
  * nouveau serveur : une clé de traduction ou un champ qu'il ne connaît pas s'affichait tel quel
  * (« graph.lane »). Le serveur renvoie cet identifiant, le client recharge la page s'il diffère.
  */
-const BUILD_ID = String(Date.now());
+/*
+ * `next build` évalue cette config plusieurs fois (processus principal, workers de compilation
+ * client et serveur). Un `Date.now()` nu donnait donc au bundle navigateur et au serveur deux
+ * identifiants différents dans le même build : le client se croyait périmé et rechargeait la page
+ * toutes les minutes. On fige l'identifiant dans l'environnement au premier chargement ; les
+ * processus enfants l'héritent, tous les chargements suivants le relisent.
+ */
+process.env.MONITOR_BUILD_ID ||= String(Date.now());
+const BUILD_ID = process.env.MONITOR_BUILD_ID;
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {

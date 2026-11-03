@@ -27,17 +27,19 @@ import { GraphDetail, GraphView, useGraph } from './GraphView';
 /**
  * Recharge la page quand le serveur a été redéployé sous un onglet resté ouvert : l'ancien
  * bundle ne connaît ni les nouvelles clés de traduction ni les nouveaux champs. Un seul
- * rechargement par minute au plus, pour qu'un identifiant illisible ne boucle jamais.
+ * rechargement par identifiant serveur, pour qu'un écart persistant ne boucle jamais.
  */
 function reloadIfStale(serverBuild: string | null | undefined): void {
   const mine = process.env.NEXT_PUBLIC_BUILD_ID;
   if (!serverBuild || !mine || serverBuild === mine) return;
   try {
-    const last = Number(window.sessionStorage.getItem('monitor.reload') ?? 0);
-    if (Date.now() - last < 60_000) return;
-    window.sessionStorage.setItem('monitor.reload', String(Date.now()));
+    // un seul rechargement par identifiant serveur : si l'écart persiste après rechargement
+    // (cache, identifiants incohérents), on s'abstient plutôt que de recharger en boucle
+    if (window.sessionStorage.getItem('monitor.reload') === serverBuild) return;
+    window.sessionStorage.setItem('monitor.reload', serverBuild);
   } catch {
-    /* sessionStorage indisponible : un rechargement unique par cycle de vie suffit */
+    /* sessionStorage indisponible : on ne recharge pas, mieux vaut un onglet périmé qu'une boucle */
+    return;
   }
   window.location.reload();
 }

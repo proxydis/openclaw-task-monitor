@@ -273,6 +273,8 @@ export type GraphKind =
   | 'session'
   | 'subagent'
   | 'lane'
+  | 'ci'
+  | 'runner'
   | 'systemd'
   | 'detached'
   | 'cron'
@@ -317,8 +319,12 @@ export type GraphNode = {
   res: Res;
   /** tous les process de l'unité, sans filtre de seuil CPU/RAM */
   procs: GraphProc[];
-  /** couples (clé de catalogue, valeur brute) : canal, clé de session, unité, répertoire… */
-  facts: { k: string; v: string }[];
+  /**
+   * couples (clé de catalogue, valeur brute) : canal, clé de session, unité, répertoire…
+   * `fmt` : valeur numérique à mettre en forme dans la langue de l'interface (Mo, durée en ms,
+   * horodatage en ms epoch), ou état d'un job CI du mini PC à traduire (`ciState`).
+   */
+  facts: { k: string; v: string; fmt?: 'mb' | 'dur' | 'clock' | 'ciState' }[];
   /** résumé ou erreur de l'unité */
   note: Msg | null;
   noteIsError: boolean;
