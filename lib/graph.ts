@@ -662,7 +662,11 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     facts.push(...ciMemFacts(r.mem));
     if (last) {
       const target = last.pr !== null ? `PR #${last.pr}` : last.headRef || last.ref;
-      facts.push({ k: js?.live ? 'graph.f.ciCurrent' : 'graph.f.ciLast', v: `${last.job} · ${target} · ${last.state}` });
+      facts.push(
+        { k: js?.live ? 'graph.f.ciCurrent' : 'graph.f.ciLast', v: `${last.job} · ${target}` },
+        // l'état brut du fichier (`en_cours`…) est traduit par le panneau
+        { k: 'graph.f.ciState', v: last.state, fmt: 'ciState' },
+      );
       facts.push(...ciJobFacts(last, now), ...ciLinks(last.repo, last.pr, last, last.runId));
     }
     const root = list.find((p) => !list.some((q) => q.pid === p.ppid));
