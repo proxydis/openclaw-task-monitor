@@ -123,6 +123,9 @@ Every setting goes through environment variables.
 | `MONITOR_PLAN_TTL_MS` | `600000` | polling interval of the usage endpoint; the API grants about one call every 5 min, going lower gets the account rate-limited |
 | `MONITOR_CI_STATE_DIR` | `~/ci-runner/etat` | state files written by the local CI runner hooks (`<runner>.json`, `historique.jsonl`), see *Local CI jobs* |
 | `MONITOR_CI_UNIT_RE` | `^gh-runner-[\w.-]+\.service$` | systemd `--user` units treated as self-hosted GitHub Actions runners |
+| `MONITOR_TRELLO_BOARD` | — | short id of the Trello board shown in the *Work* tab; empty: no Trello |
+| `CYCLE_LOT_CYCLES_DIR` | `~/agentic-dev/cycles` | batch cycle states (`<version>/etat.json`) and relay heartbeat (`.veille.json`) written by `cycle-lot` ([agentic-dev](https://github.com/proxydis/agentic-dev)) |
+| `CYCLE_LOT_RELAY_UNIT` | `cycle-lot-relais` | systemd `--user` unit of the batch cycle relay, without suffix |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | where the Claude Code OAuth token is read from (read-only) |
 
 With systemd, edit the generated unit then reload:

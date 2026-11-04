@@ -59,7 +59,7 @@ function credentials(): Creds | null {
   return creds;
 }
 
-export const trelloConfigured = (): boolean => credentials() !== null;
+export const trelloConfigured = (): boolean => BOARD !== '' && credentials() !== null;
 
 async function api(pathAndQuery: string, c: Creds): Promise<unknown> {
   const res = await fetch(`https://api.trello.com/1${pathAndQuery}`, {
@@ -101,7 +101,7 @@ let inflight: Promise<TrelloCard[] | null> | null = null;
 /** Cartes du tableau, ou `null` sans identifiants / sans valeur connue. Ne lève jamais. */
 export function getTrelloCards(): Promise<TrelloCard[] | null> {
   const creds = credentials();
-  if (!creds) return Promise.resolve(null);
+  if (!BOARD || !creds) return Promise.resolve(null);
   if (cache && Date.now() - cache.at < cache.ttl) return Promise.resolve(cache.cards);
   if (inflight) return inflight;
   inflight = fetchCards(creds)

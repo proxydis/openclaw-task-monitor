@@ -265,10 +265,10 @@ export type CiPrView = {
 /** Marge entre la réouverture de la PR et la mise en file du job : horloges du lanceur et du hook. */
 const QUEUE_SLACK_MS = 120_000;
 
-/** `app-back` → `back`, `proxydis/app-front` → `front` */
+/** `app-back` → `back`, `owner/app-front` → `front` ; un autre nom reste entier */
 export function shortRepo(repo: string): string {
   const base = repo.split('/').pop() ?? repo;
-  return base.replace(/^app-/, '') || base;
+  return /^.+-(back|front)$/.exec(base)?.[1] ?? base;
 }
 
 /** Dépôt GitHub d'un répertoire du journal : celui d'un runner dont le nom de dépôt correspond, sinon `<owner>/<dir>`. */

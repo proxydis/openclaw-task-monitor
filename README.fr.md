@@ -125,6 +125,9 @@ Tout se règle par variables d'environnement.
 | `MONITOR_PLAN_TTL_MS` | `600000` | période d'interrogation du relevé d'usage ; l'API n'accorde qu'environ un appel toutes les 5 min, descendre plus bas fait limiter le compte |
 | `MONITOR_CI_STATE_DIR` | `~/ci-runner/etat` | fichiers d'état tenus par les hooks des runners de la CI locale (`<runner>.json`, `historique.jsonl`), voir *Jobs CI du mini PC* |
 | `MONITOR_CI_UNIT_RE` | `^gh-runner-[\w.-]+\.service$` | unités systemd `--user` traitées comme des runners GitHub Actions auto-hébergés |
+| `MONITOR_TRELLO_BOARD` | — | identifiant court du tableau Trello de l'onglet *Travail* ; vide : pas de Trello |
+| `CYCLE_LOT_CYCLES_DIR` | `~/agentic-dev/cycles` | états des cycles de lot (`<version>/etat.json`) et pouls du relais (`.veille.json`) écrits par `cycle-lot` ([agentic-dev](https://github.com/proxydis/agentic-dev)) |
+| `CYCLE_LOT_RELAY_UNIT` | `cycle-lot-relais` | unité systemd `--user` du relais du cycle de lot, sans suffixe |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | emplacement du jeton OAuth Claude Code (lecture seule) |
 
 Avec systemd, éditer l'unité générée puis recharger :
