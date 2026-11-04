@@ -7,7 +7,7 @@
   --c-infra: #2dd4bf;
 }
 
-.gv-stage { position: relative; min-width: 0; }
+.gv-stage { position: relative; min-width: 0; container-type: inline-size; }
 
 /* plein écran (API native ou recouvrement CSS) : le graph prend tout l'écran, détail du nœud à droite */
 .gv-wrap.full {
@@ -64,6 +64,35 @@
 .gv-chip.j { border-color: rgba(251, 191, 36, .35); } .gv-chip.j b { color: var(--c-job); }
 .gv-chip.p { border-color: rgba(45, 212, 191, .35); } .gv-chip.p b { color: var(--c-infra); }
 .gv-chip.e { border-color: rgba(248, 113, 113, .5); color: var(--err); }
+
+/* ---- indicateurs système compacts : sur la ligne des pastilles, en haut à droite du plein écran ---- */
+.gv-sysbar {
+  position: absolute; z-index: 3; right: 12px; top: 10px;
+  display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; pointer-events: none;
+}
+.gv-sys {
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+  font-family: var(--mono); font-size: 10.5px; color: var(--txt-dim);
+  padding: 4px 8px; border-radius: 999px;
+  background: rgba(10, 14, 22, .72); border: 1px solid var(--line);
+  backdrop-filter: blur(6px); pointer-events: auto;
+}
+.gv-sys .k { color: var(--txt-faint); letter-spacing: .3px; }
+.gv-sys b { color: var(--txt); font-weight: 650; }
+.gv-sys .meter { width: 22px; margin-top: 0; }
+.gv-sys.alert { border-color: rgba(248, 113, 113, .5); }
+.gv-sys.alert b { color: var(--err); }
+.gv-sys .dot { width: 7px; height: 7px; margin: 0; }
+/* le bandeau occupe la ligne du haut : les boutons d'outils descendent d'un cran pour lui laisser la place */
+.gv-wrap.full .gv-tools { top: 46px; }
+/* scène étroite : les mini-jauges sautent pour que tout tienne encore sur la ligne des pastilles */
+@container (max-width: 1180px) {
+  .gv-sys .meter { display: none; }
+}
+/* très étroite : le bandeau passe sous la ligne des pastilles, à gauche des boutons */
+@container (max-width: 1040px) {
+  .gv-sysbar { top: 46px; right: 52px; max-width: calc(100% - 64px); }
+}
 
 .gv-tools { position: absolute; z-index: 3; right: 12px; top: 10px; display: grid; gap: 4px; }
 .gv-tools button {

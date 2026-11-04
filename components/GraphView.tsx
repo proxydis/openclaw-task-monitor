@@ -1,10 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { GraphData, GraphNode, GraphProc, TokenUsage, UnitState } from '@/lib/types';
+import type { GraphData, GraphNode, GraphProc, Snapshot, TokenUsage, UnitState } from '@/lib/types';
 import { stateLabel } from '@/lib/i18n';
 import { useI18n } from './LangProvider';
-import { ago, clock, dur, mb, mbShort, tokens, tokensFull } from './format';
+import { ago, clock, dur, lvl, mb, mbShort, resetIn, tokens, tokensFull } from './format';
 import './graph.css';
 
 // ------------------------------------------------------------------ flux
@@ -340,6 +340,7 @@ export function GraphView({
   q,
   selId,
   onSelect,
+  snap,
 }: {
   data: GraphData | null;
   err: boolean;
@@ -349,6 +350,8 @@ export function GraphView({
   q: string;
   selId: string | null;
   onSelect: (id: string | null) => void;
+  /** indicateurs machine / gateway / forfait, affichés en plein écran seulement */
+  snap: Snapshot | null;
 }) {
   const { t, m, lang } = useI18n();
   const box = useRef<HTMLDivElement>(null);
@@ -503,6 +506,7 @@ export function GraphView({
         </span>
         {err ? <span className="gv-chip e">{t('graph.err')}</span> : null}
       </div>
+      {full && snap ? <SysStrip snap={snap} /> : null}
       <div className="gv-tools">
         <button type="button" onClick={() => zoomBy(1.25)} aria-label={t('graph.zoomIn')} title={t('graph.zoomIn')}>
           +
@@ -616,6 +620,65 @@ export function GraphView({
         <div className="gv-side">
           <GraphDetail data={data} selId={selId} onSelect={onSelect} />
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------ indicateurs système (plein écran)
+
+function Gauge({ k, v, pct, tip, alert }: { k: string; v: string; pct?: number; tip?: string; alert?: boolean }) {
+  return (
+    <span className={`gv-sys${alert ? ' alert' : ''}`} title={tip}>
+      <span className="k">{k}</span>
+      <b>{v}</b>
+      {pct != null ? (
+        <span className="meter">
+          <i className={lvl(pct)} style={{ width: `${Math.min(100, Math.max(0, pct))}%` }} />
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** CPU, RAM, SWAP, gateway et limite hebdomadaire Claude, en compact : tout vient du snapshot déjà reçu */
+function SysStrip({ snap }: { snap: Snapshot }) {
+  const { t, lang } = useI18n();
+  const h = snap.host;
+  const memPct = h.memTotalMb ? (h.memUsedMb / h.memTotalMb) * 100 : 0;
+  const swapPct = h.swapTotalMb ? (h.swapUsedMb / h.swapTotalMb) * 100 : 0;
+  const weekly = snap.plan?.limits.find((l) => l.kind === 'weekly_all') ?? snap.plan?.limits.find((l) => l.group === 'weekly');
+  const gw = snap.gateway;
+  return (
+    <div className="gv-sysbar">
+      <Gauge k={t('graph.sys.cpu')} v={`${h.cpuPct.toFixed(0)} %`} pct={h.cpuPct} alert={h.cpuPct >= 90} />
+      <Gauge
+        k={t('graph.sys.ram')}
+        v={`${(h.memUsedMb / 1024).toFixed(1)}/${mb(lang, h.memTotalMb)}`}
+        pct={memPct}
+        tip={t('kpi.available', { v: mb(lang, h.memAvailMb) })}
+        alert={memPct >= 90}
+      />
+      <Gauge
+        k={t('graph.sys.swap')}
+        v={`${(h.swapUsedMb / 1024).toFixed(1)}/${mb(lang, h.swapTotalMb)}`}
+        pct={swapPct}
+        tip={t('kpi.swapUsed', { n: swapPct.toFixed(0) })}
+        alert={swapPct >= 85}
+      />
+      <span className="gv-sys" title={gw.up ? t('ui.gatewayUp', { pid: gw.pid ?? '?', port: gw.port ?? '?' }) : t('ui.gatewayDown')}>
+        <span className="k">{t('graph.sys.gateway')}</span>
+        <span className={`dot ${gw.up ? 'running' : 'failed'}`} />
+        <b>{gw.up ? `${gw.res.cpuPct.toFixed(0)} % · ${mbShort(lang, gw.res.rssMb)}` : t('graph.sys.down')}</b>
+      </span>
+      {weekly ? (
+        <Gauge
+          k={t('graph.sys.weekly')}
+          v={`${weekly.percent} %`}
+          pct={weekly.percent}
+          tip={resetIn(lang, weekly.resetsAt) ?? undefined}
+          alert={weekly.percent >= 90}
+        />
       ) : null}
     </div>
   );
