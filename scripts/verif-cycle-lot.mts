@@ -34,8 +34,8 @@ const base = {
   aller_retours: 0,
   max_aller_retours: 3,
   prs_lot: [
-    { depot: 'back', num: 301, branche: 'feat/1.0.0-lot', sha: 'a'.repeat(40), url: 'https://github.com/proxydis/app-back/pull/301' },
-    { depot: 'front', num: 401, branche: 'feat/1.0.0-lot', sha: 'b'.repeat(40), url: 'https://github.com/proxydis/app-front/pull/401' },
+    { depot: 'back', num: 301, branche: 'feat/1.0.0-lot', sha: 'a'.repeat(40), url: 'https://github.com/exemple/app-back/pull/301' },
+    { depot: 'front', num: 401, branche: 'feat/1.0.0-lot', sha: 'b'.repeat(40), url: 'https://github.com/exemple/app-front/pull/401' },
   ],
   prs_livraison: [],
   attente: null,
@@ -43,16 +43,16 @@ const base = {
   relances: { nb: 0, alerte: false },
   reveils: [],
   a_reveiller: null,
-  dernier_message: { de: 'neo', heure: '2026-11-05T09:30:00+01:00', texte: 'lot fini, arbitrages A1-A3 pris\nsuite' },
+  dernier_message: { de: 'dev', heure: '2026-11-05T09:30:00+01:00', texte: 'lot fini, arbitrages A1-A3 pris\nsuite' },
 };
 
-check('étape dev : main à Neo, nœud en cours, PR du lot en liens', () => {
-  const v = cycleView({ ...base, etape: 'dev', tour: 'neo' }, NOW)!;
+check('étape dev : main au dev, nœud en cours, PR du lot en liens', () => {
+  const v = cycleView({ ...base, etape: 'dev', tour: 'dev' }, NOW)!;
   assert.equal(v.state, 'running');
   assert.equal(key(v.label), 'graph.cycle.lot');
   assert.deepEqual(params(v.label), { v: '1.0.0' });
   assert.equal(key(v.sub), 'graph.cycle.subHand');
-  assert.deepEqual(params(v.sub), { step: 'dev', hand: 'Neo' });
+  assert.deepEqual(params(v.sub), { step: 'dev', hand: 'Dev' });
   assert.equal(v.activity, 'lot fini, arbitrages A1-A3 pris');
   assert.deepEqual(fact(v, 'graph.f.cyclePr'), base.prs_lot.map((p) => p.url));
   assert.deepEqual(fact(v, 'graph.f.cycleRounds'), ['0/3']);
@@ -73,7 +73,7 @@ check('déploiement de revue : le relais attend, run du back suivi avec son lien
           run: 9001,
           verdict: 'en cours',
           resume: 'run 9001 in_progress',
-          url: 'https://github.com/proxydis/app-back/actions/runs/9001',
+          url: 'https://github.com/exemple/app-back/actions/runs/9001',
         },
       },
     },
@@ -86,7 +86,7 @@ check('déploiement de revue : le relais attend, run du back suivi avec son lien
   assert.equal(key(r.label), 'graph.cycle.runDeploy');
   assert.equal(r.state, 'running');
   assert.equal(r.startedAt, Date.parse('2026-11-05T09:31:00+01:00'));
-  assert.deepEqual(fact(r, 'graph.f.runUrl'), ['https://github.com/proxydis/app-back/actions/runs/9001']);
+  assert.deepEqual(fact(r, 'graph.f.runUrl'), ['https://github.com/exemple/app-back/actions/runs/9001']);
   assert.match(v.activity, /back : run 9001 in_progress/);
 });
 
@@ -99,8 +99,8 @@ check('CI de la release : un vert, un rouge relancé, un run pas encore créé',
       attente: {
         depots: ['back', 'front'],
         suivi: [
-          { depot: 'back', branche: 'release/1.0.0', sha: 'c'.repeat(40), event: 'push', run: 50, url: 'https://github.com/proxydis/app-back/actions/runs/50', verdict: 'vert', resume: 'run 50 vert', debut: '2026-11-05T09:40:00Z' },
-          { depot: 'front', branche: 'release/1.0.0', sha: 'd'.repeat(40), event: 'push', run: 51, url: 'https://github.com/proxydis/app-front/actions/runs/51', verdict: 'en cours', resume: 'run 51 failure (relancé une fois : sans rapport avec le code)', debut: '2026-11-05T09:40:05Z' },
+          { depot: 'back', branche: 'release/1.0.0', sha: 'c'.repeat(40), event: 'push', run: 50, url: 'https://github.com/exemple/app-back/actions/runs/50', verdict: 'vert', resume: 'run 50 vert', debut: '2026-11-05T09:40:00Z' },
+          { depot: 'front', branche: 'release/1.0.0', sha: 'd'.repeat(40), event: 'push', run: 51, url: 'https://github.com/exemple/app-front/actions/runs/51', verdict: 'en cours', resume: 'run 51 failure (relancé une fois : sans rapport avec le code)', debut: '2026-11-05T09:40:05Z' },
         ],
       },
     },
@@ -130,10 +130,10 @@ check('CI de livraison : la PR vers master est retrouvée par son commit', () =>
       etape: 'ci-livraison',
       tour: 'veille',
       prs_livraison: [
-        { depot: 'back', num: 500, base: 'develop', sha: 'e'.repeat(40), url: 'https://github.com/proxydis/app-back/pull/500' },
-        { depot: 'back', num: 501, base: 'master', sha: 'e'.repeat(40), url: 'https://github.com/proxydis/app-back/pull/501' },
+        { depot: 'back', num: 500, base: 'develop', sha: 'e'.repeat(40), url: 'https://github.com/exemple/app-back/pull/500' },
+        { depot: 'back', num: 501, base: 'master', sha: 'e'.repeat(40), url: 'https://github.com/exemple/app-back/pull/501' },
       ],
-      attente: { suivi: [{ depot: 'back', branche: null, sha: 'e'.repeat(40), event: 'pull_request', run: 60, url: 'https://github.com/proxydis/app-back/actions/runs/60', verdict: 'rouge', resume: 'run 60 failure, jobs rouges : env-parity' }] },
+      attente: { suivi: [{ depot: 'back', branche: null, sha: 'e'.repeat(40), event: 'pull_request', run: 60, url: 'https://github.com/exemple/app-back/actions/runs/60', verdict: 'rouge', resume: 'run 60 failure, jobs rouges : env-parity' }] },
     },
     NOW,
   )!;
@@ -141,7 +141,7 @@ check('CI de livraison : la PR vers master est retrouvée par son commit', () =>
   assert.equal(key(r.label), 'graph.cycle.runPr');
   assert.deepEqual(params(r.label), { repo: 'back', n: 501, base: 'master' });
   assert.equal(r.state, 'failed');
-  assert.deepEqual(fact(r, 'graph.f.prUrl'), ['https://github.com/proxydis/app-back/pull/501']);
+  assert.deepEqual(fact(r, 'graph.f.prUrl'), ['https://github.com/exemple/app-back/pull/501']);
   assert.equal(fact(v, 'graph.f.cycleDelivery').length, 2);
 });
 
@@ -158,17 +158,17 @@ check('arrêt : nœud en pause, motif et message en note d’erreur', () => {
 });
 
 check('réveil en échec répété et agent muet : signalés en erreur', () => {
-  const w = cycleView({ ...base, etape: 'revue', tour: 'ada', a_reveiller: { agent: 'ada', motif: 'revue', essais: 3 } }, NOW)!;
+  const w = cycleView({ ...base, etape: 'revue', tour: 'relecteur', a_reveiller: { agent: 'relecteur', motif: 'revue', essais: 3 } }, NOW)!;
   assert.equal(key(w.note), 'graph.cycle.wakeFailing');
-  assert.deepEqual(params(w.note), { agent: 'Ada', n: 3 });
-  const s = cycleView({ ...base, etape: 'correction', tour: 'neo', relances: { nb: 2, alerte: true } }, NOW)!;
+  assert.deepEqual(params(w.note), { agent: 'Relecteur', n: 3 });
+  const s = cycleView({ ...base, etape: 'correction', tour: 'dev', relances: { nb: 2, alerte: true } }, NOW)!;
   assert.equal(key(s.note), 'graph.cycle.silent');
   assert.equal(s.noteIsError, true);
   const r = cycleView(
-    { ...base, etape: 'revue', tour: 'ada', reveils: [{ n: 1, heure: '2026-11-05T09:32:00+01:00', agent: 'ada', motif: 'revue', ok: true }] },
+    { ...base, etape: 'revue', tour: 'relecteur', reveils: [{ n: 1, heure: '2026-11-05T09:32:00+01:00', agent: 'relecteur', motif: 'revue', ok: true }] },
     NOW,
   )!;
-  assert.deepEqual(fact(r, 'graph.f.cycleLastWake'), ['Ada · revue · accepté']);
+  assert.deepEqual(fact(r, 'graph.f.cycleLastWake'), ['Relecteur · revue · accepté']);
   assert.equal(r.note, null);
 });
 
@@ -193,7 +193,7 @@ check('relais : en cours si le pouls a moins de 6 min, en échec sinon, erreurs 
   const vieux = relayView({ derniere: '2026-11-05T09:40:00+01:00', erreurs: [] }, 1, NOW)!;
   assert.equal(vieux.state, 'failed');
   assert.equal(key(vieux.note), 'graph.cycle.relayStale');
-  assert.deepEqual(params(vieux.note), { min: 20 });
+  assert.deepEqual(params(vieux.note), { min: 20, unit: 'cycle-lot-relais.timer' });
   const err = relayView({ derniere: '2026-11-05T09:59:00+01:00', erreurs: ['1.0.0 : RuntimeError : gh run list'] }, 1, NOW)!;
   assert.equal(key(err.note), 'graph.cycle.relayErrors');
   assert.deepEqual(fact(err, 'graph.f.relayError'), ['1.0.0 : RuntimeError : gh run list']);

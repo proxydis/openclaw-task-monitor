@@ -1,17 +1,14 @@
 /**
  * Vérification hors serveur de l'analyse de la CI locale (`lib/ci-local.ts`) :
  *
- *   node scripts/verif-ci-local.mts [chemin du journal d'essai]
+ *   node scripts/verif-ci-local.mts
  *
  * Node 26 exécute ce fichier tel quel (suppression de types native). Rien n'est écrit, rien
- * n'est lancé : le script lit le journal d'essai du lanceur (par défaut
- * `~/work/ci-local/essai-lanceur/chain.log`), fabrique des fiches d'état (attente, en cours,
- * terminé, refusé, interrompu) et vérifie ce que la vue Graph en tirerait.
+ * n'est lancé : le script part d'un journal d'étape CI au format du lanceur des lots (relevé sur
+ * un vrai lot, identifiants neutralisés), fabrique des fiches d'état (attente, en cours, terminé,
+ * refusé, interrompu) et vérifie ce que la vue Graph en tirerait.
  */
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import {
   ciLaneView,
   ciPrView,
@@ -32,17 +29,21 @@ const check = (name: string, fn: () => void) => {
 const subKey = (m: unknown) => (typeof m === 'string' ? m : (m as { k: string }).k);
 const S = (iso: string) => Math.floor(Date.parse(iso) / 1000);
 
-// ------------------------------------------------------------------ journal réel de l'essai
-const essai = process.argv[2] ?? path.join(os.homedir(), 'work/ci-local/essai-lanceur/chain.log');
-const real = fs.readFileSync(essai, 'utf8');
+// ------------------------------------------------------------------ journal d'une vraie étape CI (identifiants neutralisés)
+const real = [
+  '2026-11-03T07:13:49+01:00 CI : PR 101 (app-back) rouverte sans ci-en-pause, run attendu',
+  '2026-11-03T07:13:55+01:00 CI : PR 102 (app-front) rouverte sans ci-en-pause, run attendu',
+  '2026-11-03T07:32:06+01:00 CI : PR 101 (app-back) : success, run 900000001',
+  '2026-11-03T07:35:12+01:00 CI : PR 102 (app-front) : success, run 900000002',
+].join('\n');
 const step = parseCiChain(real);
 
 check('journal réel : deux PR, deux verdicts success', () => {
   assert.ok(step);
   assert.equal(step.prs.length, 2);
   const [b, f] = step.prs;
-  assert.deepEqual([b.n, b.dir, b.status, b.verdict, b.runId], [275, 'app-back', 'verdict', 'success', 41588573807]);
-  assert.deepEqual([f.n, f.dir, f.status, f.verdict, f.runId], [294, 'app-front', 'verdict', 'success', 41588582610]);
+  assert.deepEqual([b.n, b.dir, b.status, b.verdict, b.runId], [101, 'app-back', 'verdict', 'success', 900000001]);
+  assert.deepEqual([f.n, f.dir, f.status, f.verdict, f.runId], [102, 'app-front', 'verdict', 'success', 900000002]);
   assert.equal(step.startTs, Date.parse('2026-11-03T07:13:49+01:00'));
   assert.equal(step.end, null);
 });
@@ -54,15 +55,15 @@ check('journal réel : voie FIN en cours tant que la ligne de fin manque', () =>
 });
 
 check('journal réel : PR vertes, liens du run tirés du verdict sans fichier d\'état', () => {
-  const v = ciPrView(step!.prs[0], step!, [], Date.now());
+  const v = ciPrView(step!.prs[0], step!, [], Date.now(), 'exemple');
   assert.equal(v.state, 'done');
   assert.equal(v.sub, 'success');
-  assert.equal(v.repo, 'proxydis/app-back');
+  assert.equal(v.repo, 'exemple/app-back');
   assert.equal(v.short, 'back');
   const links = Object.fromEntries(v.facts.map((f) => [f.k, f.v]));
-  assert.equal(links['graph.f.runUrl'], 'https://github.com/proxydis/app-back/actions/runs/41588573807');
-  assert.equal(links['graph.f.prUrl'], 'https://github.com/proxydis/app-back/pull/275');
-  assert.equal(links['graph.f.checksUrl'], 'https://github.com/proxydis/app-back/pull/275/checks');
+  assert.equal(links['graph.f.runUrl'], 'https://github.com/exemple/app-back/actions/runs/900000001');
+  assert.equal(links['graph.f.prUrl'], 'https://github.com/exemple/app-back/pull/101');
+  assert.equal(links['graph.f.checksUrl'], 'https://github.com/exemple/app-back/pull/101/checks');
 });
 
 // ------------------------------------------------------------------ étape CI d'un lot, journal fabriqué
@@ -75,7 +76,7 @@ const lot = [
   '2026-11-03T21:30:12+01:00 CI : réouverture de la PR 298 impossible (/home/x/app-front)',
 ].join('\n');
 const t0 = Date.parse('2026-11-03T21:30:05+01:00');
-const st = parseCiChain(lot, 'neo-0991')!;
+const st = parseCiChain(lot, 'dev-100')!;
 
 check('lot : seules les lignes après « phase FIN terminée » comptent (ci_pause ignoré)', () => {
   assert.deepEqual(st.prs.map((p) => [p.n, p.status]), [[276, 'expected'], [295, 'expected'], [297, 'expected'], [298, 'reopenFail']]);
@@ -86,19 +87,19 @@ check('lot : seules les lignes après « phase FIN terminée » comptent (ci_pau
 const job = (o: Record<string, unknown>): CiJob =>
   parseCiJob({
     runner: 'runner-back',
-    repo: 'proxydis/app-back',
+    repo: 'exemple/app-back',
     workflow: 'back',
     job: 'quality',
     event: 'pull_request',
     ref: 'refs/pull/276/merge',
     pr: 276,
-    head_ref: 'feat/0.9.9.1-lot',
-    base_ref: 'release/0.9.9.1',
+    head_ref: 'feat/1.0.0-lot',
+    base_ref: 'release/1.0.0',
     run_id: 41600000000,
     run_attempt: 1,
-    run_url: 'https://github.com/proxydis/app-back/actions/runs/41600000000',
+    run_url: 'https://github.com/exemple/app-back/actions/runs/41600000000',
     job_url: null,
-    pr_url: 'https://github.com/proxydis/app-back/pull/276',
+    pr_url: 'https://github.com/exemple/app-back/pull/276',
     state: 'attente',
     wait: 'ci_locale',
     slot: null,
@@ -111,7 +112,7 @@ const job = (o: Record<string, unknown>): CiJob =>
   })!;
 const runner = (state: CiJob | null, workerAlive: boolean, history: CiJob[] = []): CiRunnerLite => ({
   name: 'runner-back',
-  repo: 'proxydis/app-back',
+  repo: 'exemple/app-back',
   state,
   history,
   workerAlive,
@@ -138,7 +139,7 @@ const running = job({
   slot: 2,
   started_at: S('2026-11-03T21:33:00+01:00'),
   updated_at: S('2026-11-03T21:33:00+01:00'),
-  job_url: 'https://github.com/proxydis/app-back/actions/runs/41600000000/job/125800000000',
+  job_url: 'https://github.com/exemple/app-back/actions/runs/41600000000/job/125800000000',
 });
 
 check('en cours : créneau, lien du job, process rattachés à la PR', () => {
@@ -147,11 +148,11 @@ check('en cours : créneau, lien du job, process rattachés à la PR', () => {
   assert.deepEqual(v.sub, { k: 'graph.ci.job.run', p: { job: 'quality', runner: 'runner-back', slot: 2 } });
   assert.equal(v.attached, 'runner-back');
   const f = Object.fromEntries(v.facts.map((x) => [x.k, x.v]));
-  assert.equal(f['graph.f.jobUrl'], 'https://github.com/proxydis/app-back/actions/runs/41600000000/job/125800000000');
-  assert.equal(f['graph.f.runUrl'], 'https://github.com/proxydis/app-back/actions/runs/41600000000');
+  assert.equal(f['graph.f.jobUrl'], 'https://github.com/exemple/app-back/actions/runs/41600000000/job/125800000000');
+  assert.equal(f['graph.f.runUrl'], 'https://github.com/exemple/app-back/actions/runs/41600000000');
   assert.equal(f['graph.f.slot'], '2');
   assert.equal(f['graph.f.waited'], String(2 * 60_000));
-  assert.equal(f['graph.f.branch'], 'feat/0.9.9.1-lot');
+  assert.equal(f['graph.f.branch'], 'feat/1.0.0-lot');
 });
 
 check('interrompu : fiche « en cours » sans Runner.Worker, ni vivant ni rattaché', () => {
@@ -203,18 +204,18 @@ const fin = parseCiChain(
   [
     lot,
     '2026-11-03T21:50:00+01:00 CI : PR 276 (app-back) : failure, run 41600000000, jobs rouges : quality',
-    '2026-11-03T21:51:00+01:00 CI : PR 295 (app-front) en conflit avec release/0.9.9.1, aucun run ne part : mettre feat/x à jour avec origin/release/0.9.9.1, puis relancer l\'étape CI (reprise du lot)',
+    '2026-11-03T21:51:00+01:00 CI : PR 295 (app-front) en conflit avec release/1.0.0, aucun run ne part : mettre feat/x à jour avec origin/release/1.0.0, puis relancer l\'étape CI (reprise du lot)',
     '2026-11-03T21:52:00+01:00 CI : PR 297 (app-front) : skipped, run 41600000002, jobs rouges : aucun, jobs sautés : la PR porte-t-elle encore ci-en-pause ?',
-    '2026-11-03T21:53:00+01:00 ##### neo-0991 terminé : A rc=0, B rc=0, FIN rc=0, CI rc=1',
+    '2026-11-03T21:53:00+01:00 ##### dev-100 terminé : A rc=0, B rc=0, FIN rc=0, CI rc=1',
   ].join('\n'),
-  'neo-0991',
+  'dev-100',
 )!;
 
 check('verdicts : failure (jobs rouges), conflit, skipped, réouverture impossible', () => {
   const v = fin.prs.map((p) => ciPrView(p, fin, [], now));
   assert.deepEqual(v.map((x) => x.state), ['failed', 'failed', 'failed', 'failed']);
   assert.deepEqual(v[0].sub, { k: 'graph.ci.pr.red', p: { v: 'failure', red: 'quality' } });
-  assert.deepEqual(v[1].sub, { k: 'graph.ci.pr.conflict', p: { rel: 'release/0.9.9.1' } });
+  assert.deepEqual(v[1].sub, { k: 'graph.ci.pr.conflict', p: { rel: 'release/1.0.0' } });
   assert.deepEqual(v[2].sub, { k: 'graph.ci.pr.skipped' });
   assert.deepEqual(v[3].sub, { k: 'graph.ci.pr.reopenFail' });
 });
@@ -233,8 +234,8 @@ check('pas de verdict en 3 h, aucune PR ouverte', () => {
   const to = parseCiChain(`${lot}\n2026-11-04T00:31:00+01:00 CI : pas de verdict en 3 h pour toutes les PR`)!;
   assert.equal(ciPrView(to.prs[0], to, [], now).state, 'failed');
   assert.equal(subKey(ciPrView(to.prs[0], to, [], now).sub), 'graph.ci.pr.noVerdict');
-  const none = parseCiChain('2026-11-03T21:30:00+01:00 [voie FIN] ##### phase FIN terminée : 1 étapes OK, en échec : aucune\n2026-11-03T21:30:02+01:00 CI : aucune PR ouverte vers release/0.9.9.1 pour ce lot, rien à lancer')!;
-  assert.equal(none.noPr, 'release/0.9.9.1');
+  const none = parseCiChain('2026-11-03T21:30:00+01:00 [voie FIN] ##### phase FIN terminée : 1 étapes OK, en échec : aucune\n2026-11-03T21:30:02+01:00 CI : aucune PR ouverte vers release/1.0.0 pour ce lot, rien à lancer')!;
+  assert.equal(none.noPr, 'release/1.0.0');
   assert.equal(none.prs.length, 0);
 });
 

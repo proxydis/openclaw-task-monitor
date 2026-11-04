@@ -4,8 +4,8 @@ import path from 'node:path';
 import type { Msg, UnitState } from './types';
 
 /**
- * Cycle de lot (`cycle-lot` et son relais systemd, dépôt agentic-dev) :
- * un état par lot, `cycles/<version>/etat.json`, et le pouls du relais, `cycles/.veille.json`.
+ * Cycle de lot (`cycle-lot` et son relais systemd, dépôt agentic-dev) : un état par lot,
+ * `cycles/<version>/etat.json`, et le pouls du relais, `cycles/.veille.json`.
  *
  * Le relais tient les attentes GitHub du cycle (déploiement de revue, CI de la release, CI des
  * PR de livraison, mise en production) dans un service oneshot lancé toutes les 2 min : aucun
@@ -17,8 +17,9 @@ import type { Msg, UnitState } from './types';
  * (`scripts/verif-cycle-lot.mts`) ; ce module n'importe que des modules `node:` et des types.
  */
 
-export const CYCLES_DIR =
-  process.env.CYCLE_LOT_CYCLES_DIR || path.join(os.homedir(), 'agentic-dev', 'cycles');
+export const CYCLES_DIR = process.env.CYCLE_LOT_CYCLES_DIR || path.join(os.homedir(), 'agentic-dev', 'cycles');
+/** Unit systemd du relais, sans suffixe (`<nom>.service` lancé par `<nom>.timer`). */
+export const RELAY_UNIT = process.env.CYCLE_LOT_RELAY_UNIT || 'cycle-lot-relais';
 
 /** Un lot livré reste visible ce temps-là, puis quitte le graphe. */
 const LIVRE_VISIBLE_MS = 24 * 3_600_000;
@@ -28,7 +29,8 @@ const POULS_MAX_MS = 6 * 60_000;
 /** Étapes où personne n'agit : le relais attend GitHub. */
 const ATTENTES = new Set(['deploiement-revue', 'ci-release', 'ci-livraison', 'deploiement']);
 
-const MAINS: Record<string, string> = { neo: 'Neo', ada: 'Ada', humain: 'humain' };
+/** Nom affiché d'un agent : son identifiant OpenClaw, capitalisé (`dev` → `Dev`). */
+const nomAgent = (id: string): string => (id ? id.charAt(0).toUpperCase() + id.slice(1) : '—');
 
 export type CycleFact = { k: string; v: string; fmt?: 'clock' };
 
@@ -175,20 +177,20 @@ export function cycleView(etat: unknown, now: number): CycleView | null {
     sub = { k: 'graph.cycle.subWait', p: { step: etape } };
     activity = runs.map((r) => `${r.repo} : ${r.note || '…'}`).join(' · ');
   } else {
-    sub = { k: 'graph.cycle.subHand', p: { step: etape, hand: MAINS[tour] ?? (tour || '—') } };
+    sub = { k: 'graph.cycle.subHand', p: { step: etape, hand: nomAgent(tour) } };
     activity = str(obj(e.dernier_message).texte);
   }
   if (!noteIsError && str(reveil.agent) && (num(reveil.essais) ?? 0) >= 2) {
-    note = { k: 'graph.cycle.wakeFailing', p: { agent: MAINS[str(reveil.agent)] ?? str(reveil.agent), n: num(reveil.essais) ?? 0 } };
+    note = { k: 'graph.cycle.wakeFailing', p: { agent: nomAgent(str(reveil.agent)), n: num(reveil.essais) ?? 0 } };
     noteIsError = true;
   } else if (!noteIsError && obj(e.relances).alerte) {
-    note = { k: 'graph.cycle.silent', p: { agent: MAINS[tour] ?? tour } };
+    note = { k: 'graph.cycle.silent', p: { agent: nomAgent(tour) } };
     noteIsError = true;
   }
 
   const facts: CycleFact[] = [
     { k: 'graph.f.cycleStep', v: etape },
-    { k: 'graph.f.cycleHand', v: tour === 'veille' ? 'relais' : (MAINS[tour] ?? (tour || '—')) },
+    { k: 'graph.f.cycleHand', v: etape === 'arret' ? 'humain' : tour === 'veille' ? 'relais' : nomAgent(tour) },
     ...(since !== null ? [{ k: 'graph.f.cycleSince', v: clock(since), fmt: 'clock' as const }] : []),
     { k: 'graph.f.cycleRounds', v: rounds },
   ];
@@ -203,14 +205,14 @@ export function cycleView(etat: unknown, now: number): CycleView | null {
   if (str(reveil.agent)) {
     facts.push({
       k: 'graph.f.cycleWake',
-      v: `${MAINS[str(reveil.agent)] ?? str(reveil.agent)} (${str(reveil.motif)}), ${num(reveil.essais) ?? 0} essai(s)`,
+      v: `${nomAgent(str(reveil.agent))} (${str(reveil.motif)}), ${num(reveil.essais) ?? 0} essai(s)`,
     });
   }
   if (dernier) {
     facts.push({ k: 'graph.f.cycleLastWakeAt', v: clock(tsOf(dernier.heure)), fmt: 'clock' });
     facts.push({
       k: 'graph.f.cycleLastWake',
-      v: `${MAINS[str(dernier.agent)] ?? str(dernier.agent)} · ${str(dernier.motif)} · ${dernier.ok ? 'accepté' : `échec : ${str(dernier.erreur)}`}`,
+      v: `${nomAgent(str(dernier.agent))} · ${str(dernier.motif)} · ${dernier.ok ? 'accepté' : `échec : ${str(dernier.erreur)}`}`,
     });
   }
   const dossierLot = str(e.dossier_lot);
@@ -241,7 +243,7 @@ export function relayView(pouls: unknown, visibleCycles: number, now: number): R
   const facts: CycleFact[] = [
     { k: 'graph.f.relayLast', v: clock(last), fmt: 'clock' },
     { k: 'graph.f.relayLots', v: String(visibleCycles) },
-    { k: 'graph.f.unit', v: 'cycle-lot-relais.timer' },
+    { k: 'graph.f.unit', v: `${RELAY_UNIT}.timer` },
   ];
   for (const err of errors) facts.push({ k: 'graph.f.relayError', v: err });
   return {
@@ -249,7 +251,7 @@ export function relayView(pouls: unknown, visibleCycles: number, now: number): R
     last,
     sub: { k: 'graph.cycle.relaySub', p: { n: visibleCycles } },
     note: stale
-      ? { k: 'graph.cycle.relayStale', p: { min: Math.round((now - last) / 60_000) } }
+      ? { k: 'graph.cycle.relayStale', p: { min: Math.round((now - last) / 60_000), unit: `${RELAY_UNIT}.timer` } }
       : errors.length
         ? { k: 'graph.cycle.relayErrors', p: { n: errors.length } }
         : null,
