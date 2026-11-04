@@ -1365,6 +1365,7 @@ function DashboardInner() {
               q={q}
               selId={graphSel}
               onSelect={setGraphSel}
+              snap={snap}
             />
           ) : tab === 'procs' ? (
             <Procs procs={snap.procs} />
