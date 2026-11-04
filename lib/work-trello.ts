@@ -1,5 +1,5 @@
 /**
- * Cartes Trello du tableau « Projet phénix », via l'API REST.
+ * Cartes Trello du tableau `MONITOR_TRELLO_BOARD` (identifiant court du tableau), via l'API REST.
  *
  * Les identifiants viennent de `TRELLO_API_KEY` / `TRELLO_TOKEN` (environnement du service) ou,
  * à défaut, du fichier `~/.config/openclaw-monitor/trello.env`. Ils restent dans ce module :
@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { TrelloLabel } from './work-types';
 
-const BOARD = process.env.MONITOR_TRELLO_BOARD || 'PkapJ6oP';
+const BOARD = process.env.MONITOR_TRELLO_BOARD || '';
 const TTL_MS = 5 * 60_000;
 const FAIL_TTL_MS = 60_000;
 const TIMEOUT_MS = 8000;
@@ -59,7 +59,7 @@ function credentials(): Creds | null {
   return creds;
 }
 
-export const trelloConfigured = (): boolean => credentials() !== null;
+export const trelloConfigured = (): boolean => BOARD !== '' && credentials() !== null;
 
 async function api(pathAndQuery: string, c: Creds): Promise<unknown> {
   const res = await fetch(`https://api.trello.com/1${pathAndQuery}`, {
@@ -101,7 +101,7 @@ let inflight: Promise<TrelloCard[] | null> | null = null;
 /** Cartes du tableau, ou `null` sans identifiants / sans valeur connue. Ne lève jamais. */
 export function getTrelloCards(): Promise<TrelloCard[] | null> {
   const creds = credentials();
-  if (!creds) return Promise.resolve(null);
+  if (!BOARD || !creds) return Promise.resolve(null);
   if (cache && Date.now() - cache.at < cache.ttl) return Promise.resolve(cache.cards);
   if (inflight) return inflight;
   inflight = fetchCards(creds)

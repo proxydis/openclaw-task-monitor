@@ -15,7 +15,7 @@ import {
   type CiStep,
 } from './ci-local';
 import { claudeProjectsDir } from './claude-cli';
-import { readCycles } from './cycle-lot';
+import { RELAY_UNIT, readCycles } from './cycle-lot';
 import { unitOfPid, type RawProc } from './procs';
 import { OC_HOME, REDACT } from './store';
 import { readSessionTokens, sumTokens } from './token-usage';
@@ -863,7 +863,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
   // --- runners de la CI locale, après les lots : le job d'une PR de lot est déjà rangé sous sa voie FIN
   for (const r of ciRunners) runnerNode(r);
 
-  // --- cycle de lot (`cycle-lot`, relais `phenix-relais`) : un nœud par lot sous le relais, et les runs
+  // --- cycle de lot (`cycle-lot` et son relais systemd) : un nœud par lot sous le relais, et les runs
   // GitHub qu'il attend. Ces attentes n'ont aucun process : sans ces nœuds, un lot en attente de sa CI
   // de release ou de sa mise en production ne laisserait aucune trace dans le graphe.
   const cyc = readCycles(now);
@@ -871,7 +871,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     const relayPids: number[] = [];
     for (const p of procs.values()) {
       if (placed.has(p.pid) || !/cycle-lot|openclaw|(^|\/)gh(\s|$)/.test(p.cmd)) continue;
-      if (unitOfPid(p.pid) === 'phenix-relais.service') relayPids.push(p.pid);
+      if (unitOfPid(p.pid) === `${RELAY_UNIT}.service`) relayPids.push(p.pid);
     }
     const list = procsOf(relayPids);
     const relayId = push({

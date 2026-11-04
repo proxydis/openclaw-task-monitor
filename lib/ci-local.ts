@@ -24,7 +24,7 @@ import type { Msg, UnitState } from './types';
 /** Ce que le journal dit d'une PR du lot pendant l'étape CI. */
 export type CiPrLog = {
   n: number;
-  /** nom du répertoire du dépôt dans le journal (`phenix-back`) */
+  /** nom du répertoire du dépôt dans le journal (`app-back`) */
   dir: string;
   status: 'expected' | 'reopenFail' | 'conflict' | 'verdict';
   /** conclusion GitHub du run (`success`, `failure`, `skipped`…) */
@@ -247,7 +247,7 @@ export type CiFact = { k: string; v: string; fmt?: 'mb' | 'dur' | 'clock' };
 
 export type CiPrView = {
   repo: string;
-  /** partie courte du dépôt : `back` pour `phenix-back` */
+  /** partie courte du dépôt : `back` pour `app-back` */
   short: string;
   n: number;
   state: UnitState;
@@ -265,10 +265,10 @@ export type CiPrView = {
 /** Marge entre la réouverture de la PR et la mise en file du job : horloges du lanceur et du hook. */
 const QUEUE_SLACK_MS = 120_000;
 
-/** `phenix-back` → `back`, `proxydis/phenix-front` → `front` */
+/** `app-back` → `back`, `owner/app-front` → `front` ; un autre nom reste entier */
 export function shortRepo(repo: string): string {
   const base = repo.split('/').pop() ?? repo;
-  return base.replace(/^phenix-/, '') || base;
+  return /^.+-(back|front)$/.exec(base)?.[1] ?? base;
 }
 
 /** Dépôt GitHub d'un répertoire du journal : celui d'un runner dont le nom de dépôt correspond, sinon `<owner>/<dir>`. */

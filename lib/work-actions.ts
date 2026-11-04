@@ -3,7 +3,7 @@
  *
  * Les transcripts sont `<claudeProjectsDir>/<slug>/<cliSessionId>.jsonl`, où `<slug>` est le
  * répertoire de travail du CLI avec `/` et `.` remplacés par `-`. Un agent a donc un dossier
- * par workspace (`…-workspace-neo`) et un par worktree de code (`…-workspace-neo-phenix-back-wt-x`).
+ * par workspace (`…-workspace-dev`) et un par worktree de code (`…-workspace-dev-app-back-wt-x`).
  * Seule la fin des fichiers est lue (≤ 256 Ko) : un transcript peut peser des dizaines de Mo.
  */
 import fs from 'node:fs';

@@ -125,6 +125,9 @@ Tout se règle par variables d'environnement.
 | `MONITOR_PLAN_TTL_MS` | `600000` | période d'interrogation du relevé d'usage ; l'API n'accorde qu'environ un appel toutes les 5 min, descendre plus bas fait limiter le compte |
 | `MONITOR_CI_STATE_DIR` | `~/ci-runner/etat` | fichiers d'état tenus par les hooks des runners de la CI locale (`<runner>.json`, `historique.jsonl`), voir *Jobs CI du mini PC* |
 | `MONITOR_CI_UNIT_RE` | `^gh-runner-[\w.-]+\.service$` | unités systemd `--user` traitées comme des runners GitHub Actions auto-hébergés |
+| `MONITOR_TRELLO_BOARD` | — | identifiant court du tableau Trello de l'onglet *Travail* ; vide : pas de Trello |
+| `CYCLE_LOT_CYCLES_DIR` | `~/agentic-dev/cycles` | états des cycles de lot (`<version>/etat.json`) et pouls du relais (`.veille.json`) écrits par `cycle-lot` ([agentic-dev](https://github.com/proxydis/agentic-dev)) |
+| `CYCLE_LOT_RELAY_UNIT` | `cycle-lot-relais` | unité systemd `--user` du relais du cycle de lot, sans suffixe |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | emplacement du jeton OAuth Claude Code (lecture seule) |
 
 Avec systemd, éditer l'unité générée puis recharger :
@@ -171,7 +174,7 @@ rattacher au moins l'agent. Le reste du sous-arbre de la gateway est comptabilis
 Quand les runners GitHub Actions d'un lot tournent sur la machine (unités utilisateur
 `gh-runner-*.service`), la vue Graph les montre, sans aucun appel réseau :
 
-- **Un nœud par runner vivant** sous la gateway (« CI locale · geekom-back ») : libre ou
+- **Un nœud par runner vivant** sous la gateway (« CI locale · runner-back ») : libre ou
   occupé, ses process, la mémoire de son cgroup (`memory.current`, `memory.swap.current`,
   `memory.peak`, nombre d'événements `memory.high`, bornes) et son dernier job connu, avec liens.
 - **Pendant l'étape CI d'un lot `run-lot.sh`** (après `##### phase FIN terminée`), la voie FIN

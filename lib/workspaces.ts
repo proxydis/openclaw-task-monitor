@@ -2,7 +2,7 @@
  * Rattachement d'un chemin à un agent, par son workspace.
  *
  * Règle unique, partagée par toutes les pistes de détection : **le workspace le plus long
- * gagne**. `…/workspace` est un préfixe de `…/workspace-neo` sans en être le parent, donc un
+ * gagne**. `…/workspace` est un préfixe de `…/workspace-dev` sans en être le parent, donc un
  * simple `startsWith` attribuerait à `main` le travail de `neo`.
  */
 import path from 'node:path';

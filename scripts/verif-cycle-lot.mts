@@ -5,7 +5,7 @@
  *
  * Node 26 exécute ce fichier tel quel (suppression de types native). Rien n'est écrit, rien
  * n'est lancé : les états sont fabriqués au format de `cycles/<version>/etat.json` écrit par
- * `cycle-lot` (~/.openclaw/shared/phenix-lot), étape par étape, et le script vérifie ce que la
+ * `cycle-lot` (dépôt agentic-dev), étape par étape, et le script vérifie ce que la
  * vue Graph en tire. Il vérifie aussi que les lignes Trello ajoutées au journal de chaîne de
  * `run-lot.sh` par le cycle de lot ne changent rien à l'analyse de l'étape CI.
  */
@@ -28,14 +28,14 @@ const base = {
   version: '1.0.0',
   prefixe: '100',
   release: 'release/1.0.0',
-  fil: { canal: 'C0B8XQ6QQF2', ts: '1793800000.000100' },
-  dossier_lot: '/home/meher/.openclaw/workspace-neo/prompts/100',
+  fil: { canal: 'C000TEST', ts: '1700000000.000100' },
+  dossier_lot: '/srv/lots/1.0.0',
   depuis: '2026-11-05T09:30:00+01:00',
   aller_retours: 0,
   max_aller_retours: 3,
   prs_lot: [
-    { depot: 'back', num: 301, branche: 'feat/1.0.0-lot', sha: 'a'.repeat(40), url: 'https://github.com/proxydis/phenix-back/pull/301' },
-    { depot: 'front', num: 401, branche: 'feat/1.0.0-lot', sha: 'b'.repeat(40), url: 'https://github.com/proxydis/phenix-front/pull/401' },
+    { depot: 'back', num: 301, branche: 'feat/1.0.0-lot', sha: 'a'.repeat(40), url: 'https://github.com/exemple/app-back/pull/301' },
+    { depot: 'front', num: 401, branche: 'feat/1.0.0-lot', sha: 'b'.repeat(40), url: 'https://github.com/exemple/app-front/pull/401' },
   ],
   prs_livraison: [],
   attente: null,
@@ -43,16 +43,16 @@ const base = {
   relances: { nb: 0, alerte: false },
   reveils: [],
   a_reveiller: null,
-  dernier_message: { de: 'neo', heure: '2026-11-05T09:30:00+01:00', texte: 'lot fini, arbitrages A1-A3 pris\nsuite' },
+  dernier_message: { de: 'dev', heure: '2026-11-05T09:30:00+01:00', texte: 'lot fini, arbitrages A1-A3 pris\nsuite' },
 };
 
-check('étape dev : main à Neo, nœud en cours, PR du lot en liens', () => {
-  const v = cycleView({ ...base, etape: 'dev', tour: 'neo' }, NOW)!;
+check('étape dev : main au dev, nœud en cours, PR du lot en liens', () => {
+  const v = cycleView({ ...base, etape: 'dev', tour: 'dev' }, NOW)!;
   assert.equal(v.state, 'running');
   assert.equal(key(v.label), 'graph.cycle.lot');
   assert.deepEqual(params(v.label), { v: '1.0.0' });
   assert.equal(key(v.sub), 'graph.cycle.subHand');
-  assert.deepEqual(params(v.sub), { step: 'dev', hand: 'Neo' });
+  assert.deepEqual(params(v.sub), { step: 'dev', hand: 'Dev' });
   assert.equal(v.activity, 'lot fini, arbitrages A1-A3 pris');
   assert.deepEqual(fact(v, 'graph.f.cyclePr'), base.prs_lot.map((p) => p.url));
   assert.deepEqual(fact(v, 'graph.f.cycleRounds'), ['0/3']);
@@ -73,7 +73,7 @@ check('déploiement de revue : le relais attend, run du back suivi avec son lien
           run: 9001,
           verdict: 'en cours',
           resume: 'run 9001 in_progress',
-          url: 'https://github.com/proxydis/phenix-back/actions/runs/9001',
+          url: 'https://github.com/exemple/app-back/actions/runs/9001',
         },
       },
     },
@@ -86,7 +86,7 @@ check('déploiement de revue : le relais attend, run du back suivi avec son lien
   assert.equal(key(r.label), 'graph.cycle.runDeploy');
   assert.equal(r.state, 'running');
   assert.equal(r.startedAt, Date.parse('2026-11-05T09:31:00+01:00'));
-  assert.deepEqual(fact(r, 'graph.f.runUrl'), ['https://github.com/proxydis/phenix-back/actions/runs/9001']);
+  assert.deepEqual(fact(r, 'graph.f.runUrl'), ['https://github.com/exemple/app-back/actions/runs/9001']);
   assert.match(v.activity, /back : run 9001 in_progress/);
 });
 
@@ -99,8 +99,8 @@ check('CI de la release : un vert, un rouge relancé, un run pas encore créé',
       attente: {
         depots: ['back', 'front'],
         suivi: [
-          { depot: 'back', branche: 'release/1.0.0', sha: 'c'.repeat(40), event: 'push', run: 50, url: 'https://github.com/proxydis/phenix-back/actions/runs/50', verdict: 'vert', resume: 'run 50 vert', debut: '2026-11-05T09:40:00Z' },
-          { depot: 'front', branche: 'release/1.0.0', sha: 'd'.repeat(40), event: 'push', run: 51, url: 'https://github.com/proxydis/phenix-front/actions/runs/51', verdict: 'en cours', resume: 'run 51 failure (relancé une fois : sans rapport avec le code)', debut: '2026-11-05T09:40:05Z' },
+          { depot: 'back', branche: 'release/1.0.0', sha: 'c'.repeat(40), event: 'push', run: 50, url: 'https://github.com/exemple/app-back/actions/runs/50', verdict: 'vert', resume: 'run 50 vert', debut: '2026-11-05T09:40:00Z' },
+          { depot: 'front', branche: 'release/1.0.0', sha: 'd'.repeat(40), event: 'push', run: 51, url: 'https://github.com/exemple/app-front/actions/runs/51', verdict: 'en cours', resume: 'run 51 failure (relancé une fois : sans rapport avec le code)', debut: '2026-11-05T09:40:05Z' },
         ],
       },
     },
@@ -130,10 +130,10 @@ check('CI de livraison : la PR vers master est retrouvée par son commit', () =>
       etape: 'ci-livraison',
       tour: 'veille',
       prs_livraison: [
-        { depot: 'back', num: 500, base: 'develop', sha: 'e'.repeat(40), url: 'https://github.com/proxydis/phenix-back/pull/500' },
-        { depot: 'back', num: 501, base: 'master', sha: 'e'.repeat(40), url: 'https://github.com/proxydis/phenix-back/pull/501' },
+        { depot: 'back', num: 500, base: 'develop', sha: 'e'.repeat(40), url: 'https://github.com/exemple/app-back/pull/500' },
+        { depot: 'back', num: 501, base: 'master', sha: 'e'.repeat(40), url: 'https://github.com/exemple/app-back/pull/501' },
       ],
-      attente: { suivi: [{ depot: 'back', branche: null, sha: 'e'.repeat(40), event: 'pull_request', run: 60, url: 'https://github.com/proxydis/phenix-back/actions/runs/60', verdict: 'rouge', resume: 'run 60 failure, jobs rouges : env-parity' }] },
+      attente: { suivi: [{ depot: 'back', branche: null, sha: 'e'.repeat(40), event: 'pull_request', run: 60, url: 'https://github.com/exemple/app-back/actions/runs/60', verdict: 'rouge', resume: 'run 60 failure, jobs rouges : env-parity' }] },
     },
     NOW,
   )!;
@@ -141,13 +141,13 @@ check('CI de livraison : la PR vers master est retrouvée par son commit', () =>
   assert.equal(key(r.label), 'graph.cycle.runPr');
   assert.deepEqual(params(r.label), { repo: 'back', n: 501, base: 'master' });
   assert.equal(r.state, 'failed');
-  assert.deepEqual(fact(r, 'graph.f.prUrl'), ['https://github.com/proxydis/phenix-back/pull/501']);
+  assert.deepEqual(fact(r, 'graph.f.prUrl'), ['https://github.com/exemple/app-back/pull/501']);
   assert.equal(fact(v, 'graph.f.cycleDelivery').length, 2);
 });
 
 check('arrêt : nœud en pause, motif et message en note d’erreur', () => {
   const v = cycleView(
-    { ...base, etape: 'arret', tour: 'codeman', aller_retours: 3, arret: { motif: 'aller-retours', message: '3e verdict À REPRENDRE', par: 'ada' } },
+    { ...base, etape: 'arret', tour: 'humain', aller_retours: 3, arret: { motif: 'aller-retours', message: '3e verdict À REPRENDRE', par: 'ada' } },
     NOW,
   )!;
   assert.equal(v.state, 'paused');
@@ -158,17 +158,17 @@ check('arrêt : nœud en pause, motif et message en note d’erreur', () => {
 });
 
 check('réveil en échec répété et agent muet : signalés en erreur', () => {
-  const w = cycleView({ ...base, etape: 'revue', tour: 'ada', a_reveiller: { agent: 'ada', motif: 'revue', essais: 3 } }, NOW)!;
+  const w = cycleView({ ...base, etape: 'revue', tour: 'relecteur', a_reveiller: { agent: 'relecteur', motif: 'revue', essais: 3 } }, NOW)!;
   assert.equal(key(w.note), 'graph.cycle.wakeFailing');
-  assert.deepEqual(params(w.note), { agent: 'Ada', n: 3 });
-  const s = cycleView({ ...base, etape: 'correction', tour: 'neo', relances: { nb: 2, alerte: true } }, NOW)!;
+  assert.deepEqual(params(w.note), { agent: 'Relecteur', n: 3 });
+  const s = cycleView({ ...base, etape: 'correction', tour: 'dev', relances: { nb: 2, alerte: true } }, NOW)!;
   assert.equal(key(s.note), 'graph.cycle.silent');
   assert.equal(s.noteIsError, true);
   const r = cycleView(
-    { ...base, etape: 'revue', tour: 'ada', reveils: [{ n: 1, heure: '2026-11-05T09:32:00+01:00', agent: 'ada', motif: 'revue', ok: true }] },
+    { ...base, etape: 'revue', tour: 'relecteur', reveils: [{ n: 1, heure: '2026-11-05T09:32:00+01:00', agent: 'relecteur', motif: 'revue', ok: true }] },
     NOW,
   )!;
-  assert.deepEqual(fact(r, 'graph.f.cycleLastWake'), ['Ada · revue · accepté']);
+  assert.deepEqual(fact(r, 'graph.f.cycleLastWake'), ['Relecteur · revue · accepté']);
   assert.equal(r.note, null);
 });
 
@@ -193,7 +193,7 @@ check('relais : en cours si le pouls a moins de 6 min, en échec sinon, erreurs 
   const vieux = relayView({ derniere: '2026-11-05T09:40:00+01:00', erreurs: [] }, 1, NOW)!;
   assert.equal(vieux.state, 'failed');
   assert.equal(key(vieux.note), 'graph.cycle.relayStale');
-  assert.deepEqual(params(vieux.note), { min: 20 });
+  assert.deepEqual(params(vieux.note), { min: 20, unit: 'cycle-lot-relais.timer' });
   const err = relayView({ derniere: '2026-11-05T09:59:00+01:00', erreurs: ['1.0.0 : RuntimeError : gh run list'] }, 1, NOW)!;
   assert.equal(key(err.note), 'graph.cycle.relayErrors');
   assert.deepEqual(fact(err, 'graph.f.relayError'), ['1.0.0 : RuntimeError : gh run list']);
@@ -209,10 +209,10 @@ check('journal de chaîne avec les lignes Trello du cycle : étape CI inchangée
     '2026-11-05T02:40:00+01:00 [voie FIN] ##### phase FIN terminée : 1 étapes OK, en échec : aucune',
     '2026-11-05T02:40:05+01:00 Trello : carte 02 (nZq8R2aB) en Waiting for review',
     '2026-11-05T02:40:06+01:00 Trello : échec du déplacement de la carte 03 en Waiting for review',
-    '2026-11-05T02:41:00+01:00 CI : PR 301 (phenix-back) rouverte sans ci-en-pause, run attendu',
-    '2026-11-05T02:41:01+01:00 CI : PR 401 (phenix-front) rouverte sans ci-en-pause, run attendu',
-    '2026-11-05T03:05:00+01:00 CI : PR 301 (phenix-back) : success, run 41800000001',
-    '2026-11-05T03:12:00+01:00 CI : PR 401 (phenix-front) : success, run 41800000002',
+    '2026-11-05T02:41:00+01:00 CI : PR 301 (app-back) rouverte sans ci-en-pause, run attendu',
+    '2026-11-05T02:41:01+01:00 CI : PR 401 (app-front) rouverte sans ci-en-pause, run attendu',
+    '2026-11-05T03:05:00+01:00 CI : PR 301 (app-back) : success, run 41800000001',
+    '2026-11-05T03:12:00+01:00 CI : PR 401 (app-front) : success, run 41800000002',
     '2026-11-05T03:12:05+01:00 ##### 100 terminé : A rc=0, B rc=0, FIN rc=0, CI rc=0',
   ];
   const sans = lignes.filter((l) => !/Trello/.test(l)).join('\n');

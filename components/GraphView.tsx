@@ -224,7 +224,7 @@ function clip(s: string, n: number): string {
   return one.length > n ? `${one.slice(0, n - 1)}…` : one;
 }
 
-/** « slack:openclaw-codeman-#projet-phenix-dev » → « #projet-phenix-dev » : le canal est ce qui distingue les sessions. */
+/** « slack:mon-espace-#mon-canal » → « #mon-canal » : le canal est ce qui distingue les sessions. */
 function cardTitle(raw: string): string {
   const m = raw.match(/^[a-z]+:[^#\s]*(#.+)$/i);
   return m ? m[1] : raw;
