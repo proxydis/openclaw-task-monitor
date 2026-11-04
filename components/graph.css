@@ -7,7 +7,7 @@
   --c-infra: #2dd4bf;
 }
 
-.gv-stage { position: relative; min-width: 0; }
+.gv-stage { position: relative; min-width: 0; container-type: inline-size; }
 
 /* plein écran (API native ou recouvrement CSS) : le graph prend tout l'écran, détail du nœud à droite */
 .gv-wrap.full {
@@ -64,6 +64,32 @@
 .gv-chip.j { border-color: rgba(251, 191, 36, .35); } .gv-chip.j b { color: var(--c-job); }
 .gv-chip.p { border-color: rgba(45, 212, 191, .35); } .gv-chip.p b { color: var(--c-infra); }
 .gv-chip.e { border-color: rgba(248, 113, 113, .5); color: var(--err); }
+
+/* ---- indicateurs système compacts, en haut à droite du plein écran (à gauche des boutons d'outils) ---- */
+.gv-sysbar {
+  position: absolute; z-index: 3; right: 52px; top: 10px; max-width: calc(100% - 64px);
+  display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; pointer-events: none;
+}
+.gv-sys {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  font-family: var(--mono); font-size: 10.5px; color: var(--txt-dim);
+  padding: 4px 9px; border-radius: 999px;
+  background: rgba(10, 14, 22, .72); border: 1px solid var(--line);
+  backdrop-filter: blur(6px); pointer-events: auto;
+}
+.gv-sys .k { color: var(--txt-faint); letter-spacing: .4px; }
+.gv-sys b { color: var(--txt); font-weight: 650; }
+.gv-sys .meter { width: 34px; margin-top: 0; }
+.gv-sys.alert { border-color: rgba(248, 113, 113, .5); }
+.gv-sys.alert b { color: var(--err); }
+.gv-sys .dot { width: 7px; height: 7px; margin: 0; }
+/* scène trop étroite pour tenir sur la ligne des pastilles : le bandeau passe dessous, toujours à droite */
+@container (max-width: 1360px) {
+  .gv-sysbar { top: 46px; }
+}
+@media (max-width: 720px) {
+  .gv-sysbar { right: 12px; top: 80px; max-width: calc(100% - 24px); }
+}
 
 .gv-tools { position: absolute; z-index: 3; right: 12px; top: 10px; display: grid; gap: 4px; }
 .gv-tools button {
