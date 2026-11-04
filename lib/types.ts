@@ -275,6 +275,7 @@ export type GraphKind =
   | 'lane'
   | 'ci'
   | 'runner'
+  | 'cycle'
   | 'systemd'
   | 'detached'
   | 'cron'
