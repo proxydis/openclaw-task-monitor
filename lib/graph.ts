@@ -15,6 +15,7 @@ import {
   type CiStep,
 } from './ci-local';
 import { claudeProjectsDir } from './claude-cli';
+import { readCycles } from './cycle-lot';
 import { unitOfPid, type RawProc } from './procs';
 import { OC_HOME, REDACT } from './store';
 import { readSessionTokens, sumTokens } from './token-usage';
@@ -862,6 +863,85 @@ export function buildGraph(ctx: GraphCtx): GraphData {
   // --- runners de la CI locale, après les lots : le job d'une PR de lot est déjà rangé sous sa voie FIN
   for (const r of ciRunners) runnerNode(r);
 
+  // --- cycle de lot (`cycle-lot`, relais `phenix-relais`) : un nœud par lot sous le relais, et les runs
+  // GitHub qu'il attend. Ces attentes n'ont aucun process : sans ces nœuds, un lot en attente de sa CI
+  // de release ou de sa mise en production ne laisserait aucune trace dans le graphe.
+  const cyc = readCycles(now);
+  if (cyc.relay && (cyc.cycles.length || cyc.relay.noteIsError)) {
+    const relayPids: number[] = [];
+    for (const p of procs.values()) {
+      if (placed.has(p.pid) || !/cycle-lot|openclaw|(^|\/)gh(\s|$)/.test(p.cmd)) continue;
+      if (unitOfPid(p.pid) === 'phenix-relais.service') relayPids.push(p.pid);
+    }
+    const list = procsOf(relayPids);
+    const relayId = push({
+      id: 'cyc:relais',
+      parent: 'gw',
+      role: 'infra',
+      kind: 'service',
+      label: { k: 'graph.cycle.relay' },
+      sub: cyc.relay.sub,
+      state: cyc.relay.state,
+      startedAt: cyc.relay.last,
+      endedAt: null,
+      model: null,
+      effort: null,
+      activity: list.length ? { type: 'command', text: REDACT ? null : list[0].cmd.slice(0, CMD_MAX) } : NONE,
+      usage: null,
+      turnUsage: null,
+      res: resOf(list),
+      procs: list,
+      facts: cyc.relay.facts,
+      note: cyc.relay.note,
+      noteIsError: cyc.relay.noteIsError,
+    });
+    for (const c of cyc.cycles) {
+      const lotId = push({
+        id: `cyc:${c.version}`,
+        parent: relayId,
+        role: 'job',
+        kind: 'cycle',
+        label: c.label,
+        sub: c.sub,
+        state: c.state,
+        startedAt: c.since,
+        endedAt: c.state === 'done' ? c.since : null,
+        model: null,
+        effort: null,
+        activity: c.activity ? { type: 'job', text: c.activity } : NONE,
+        usage: null,
+        turnUsage: null,
+        res: ZERO_RES,
+        procs: [],
+        facts: c.facts,
+        note: c.note,
+        noteIsError: c.noteIsError,
+      });
+      for (const r of c.runs) {
+        push({
+          id: `${lotId}:${r.key}`,
+          parent: lotId,
+          role: 'job',
+          kind: 'ci',
+          label: r.label,
+          sub: r.note || null,
+          state: r.state,
+          startedAt: r.startedAt,
+          endedAt: null,
+          model: null,
+          effort: null,
+          activity: NONE,
+          usage: null,
+          turnUsage: null,
+          res: ZERO_RES,
+          procs: [],
+          facts: r.facts,
+          note: null,
+        });
+      }
+    }
+  }
+
   // --- tout le reste d'OpenClaw : services systemd `openclaw-*`, puis process isolés
   const services = new Map<string, number[]>();
   const strays: number[] = [];
@@ -930,7 +1010,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
   if (REDACT) {
     let n = 0;
     for (const g of nodes) {
-      if (g.kind === 'session' || g.kind === 'subagent' || g.kind === 'lane' || g.kind === 'ci' || g.kind === 'runner' || g.kind === 'systemd' || g.kind === 'detached' || g.kind === 'cron') {
+      if (g.kind === 'session' || g.kind === 'subagent' || g.kind === 'lane' || g.kind === 'ci' || g.kind === 'runner' || g.kind === 'cycle' || g.kind === 'systemd' || g.kind === 'detached' || g.kind === 'cron') {
         n++;
         g.label = { k: g.kind === 'subagent' ? 'redact.subagent' : 'redact.session', p: { n } };
         g.sub = null;
