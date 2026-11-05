@@ -135,6 +135,9 @@
 .gv-node .gv-role { fill: var(--c); font-size: 9px; letter-spacing: 1.1px; text-transform: uppercase; font-weight: 650; opacity: .9; }
 .gv-node .gv-sub { fill: var(--txt-dim); font-size: 10.5px; font-family: var(--mono); }
 .gv-node .gv-sep { stroke: #1a2433; stroke-width: 1; }
+/* lot du cycle : cartes faites / cartes du lot, et la jauge sur la ligne de séparation */
+.gv-node .gv-count { font-size: 11px; letter-spacing: .3px; font-family: var(--mono); text-transform: none; opacity: 1; }
+.gv-node .gv-prog { stroke: var(--c); stroke-width: 2; opacity: .85; }
 .gv-node .gv-meta { fill: var(--txt-dim); font-size: 10.5px; font-family: var(--mono); }
 .gv-node .gv-tok { fill: var(--c); font-weight: 600; }
 .gv-node .gv-dim { fill: var(--txt-faint); }

@@ -329,6 +329,8 @@ export type GraphNode = {
   /** résumé ou erreur de l'unité */
   note: Msg | null;
   noteIsError: boolean;
+  /** avancement d'un lot (cycle de lot) : cartes faites par le dev sur cartes du lot, d'après Trello */
+  progress?: { done: number; total: number } | null;
 };
 
 export type GraphData = {

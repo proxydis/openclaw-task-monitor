@@ -916,6 +916,7 @@ export function buildGraph(ctx: GraphCtx): GraphData {
         facts: c.facts,
         note: c.note,
         noteIsError: c.noteIsError,
+        progress: c.progress,
       });
       for (const r of c.runs) {
         push({
