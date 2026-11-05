@@ -227,4 +227,40 @@ check('journal de chaîne avec les lignes Trello du cycle : étape CI inchangée
   assert.equal(a.end?.rc, 0);
 });
 
+check('avancement du lot : cartes faites / cartes du lot, détail par liste et heure de lecture', () => {
+  const sans = cycleView({ ...base, etape: 'dev', tour: 'dev' }, NOW)!;
+  assert.equal(sans.progress, null);
+  assert.deepEqual(fact(sans, 'graph.f.cycleCards'), []);
+  const avancement = {
+    heure: '2026-11-05T09:58:00+01:00',
+    faites: 4,
+    total: 22,
+    par_liste: { 'Not Ready': 2, 'Work in progress': 16, 'Waiting for review': 4 },
+    cartes: { '1': 'waiting', '2': 'wip' },
+  };
+  const v = cycleView({ ...base, etape: 'dev', tour: 'dev', avancement }, NOW)!;
+  assert.deepEqual(v.progress, { done: 4, total: 22 });
+  assert.deepEqual(fact(v, 'graph.f.cycleCards'), ['4/22']);
+  assert.deepEqual(fact(v, 'graph.f.cycleCardsLists'), ['Not Ready 2 · Work in progress 16 · Waiting for review 4']);
+  assert.deepEqual(fact(v, 'graph.f.cycleCardsAt'), [String(Date.parse(avancement.heure))]);
+  assert.deepEqual(fact(v, 'graph.f.cycleCardsError'), []);
+  assert.equal(key(v.label), 'graph.cycle.lot');
+});
+
+check('avancement : Trello en panne, dernier compte gardé avec l’erreur ; total nul ou compte incohérent', () => {
+  const panne = cycleView(
+    { ...base, etape: 'revue', tour: 'relecteur', avancement: { heure: '2026-11-05T09:40:00+01:00', faites: 22, total: 22, erreur: 'Trello GET : timed out' } },
+    NOW,
+  )!;
+  assert.deepEqual(panne.progress, { done: 22, total: 22 });
+  assert.deepEqual(fact(panne, 'graph.f.cycleCardsError'), ['Trello GET : timed out']);
+  assert.equal(panne.noteIsError, false);
+  assert.equal(cycleView({ ...base, etape: 'dev', tour: 'dev', avancement: { faites: 0, total: 0 } }, NOW)!.progress, null);
+  assert.equal(cycleView({ ...base, etape: 'dev', tour: 'dev', avancement: { erreur: 'x' } }, NOW)!.progress, null);
+  assert.deepEqual(cycleView({ ...base, etape: 'dev', tour: 'dev', avancement: { faites: 5, total: 3 } }, NOW)!.progress, {
+    done: 3,
+    total: 3,
+  });
+});
+
 console.log(`\n${ok} vérifications passées`);

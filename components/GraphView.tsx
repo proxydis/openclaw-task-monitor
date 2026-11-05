@@ -281,6 +281,8 @@ function Card({
   const tokMark = (n.turnUsage ?? n.usage)?.approx ? '~' : '';
   // CI locale : étiquette « CI » à la place du rôle, plus courte, qui laisse la place au nom du runner
   const ci = n.kind === 'ci' || n.kind === 'runner';
+  // lot du cycle : cartes faites / cartes du lot à la place du rôle, et la ligne de séparation en jauge
+  const prog = n.progress && n.progress.total > 0 ? n.progress : null;
   return (
     <g
       className={`gv-node ${n.role} ${n.state} k-${n.kind}${selected ? ' sel' : ''}${dim ? ' dim' : ''}`}
@@ -297,13 +299,14 @@ function Card({
       <text className="gv-title" x={36} y={27}>
         {clip(title, ci ? 27 : 21)}
       </text>
-      <text className="gv-role" x={CARD_W - 12} y={26} textAnchor="end">
-        {ci ? t('graph.role.ci') : t(ROLE_KEY[n.role])}
+      <text className={prog ? 'gv-role gv-count' : 'gv-role'} x={CARD_W - 12} y={26} textAnchor="end">
+        {prog ? `${prog.done}/${prog.total}` : ci ? t('graph.role.ci') : t(ROLE_KEY[n.role])}
       </text>
       <text className="gv-sub" x={16} y={46}>
         {clip(sub, 40)}
       </text>
       <line className="gv-sep" x1={16} x2={CARD_W - 16} y1={56} y2={56} />
+      {prog ? <line className="gv-prog" x1={16} x2={16 + ((CARD_W - 32) * prog.done) / prog.total} y1={56} y2={56} /> : null}
       <text className="gv-meta" x={16} y={73}>
         <tspan className="gv-tok">{tok === null ? `— ${t('graph.tokShort')}` : `${tokMark}${tokens(lang, tok)} ${t('graph.tokShort')}`}</tspan>
         <tspan dx={12}>{n.res.procs ? `${n.res.cpuPct.toFixed(0)}%` : '—'}</tspan>

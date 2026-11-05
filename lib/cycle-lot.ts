@@ -13,7 +13,8 @@ import type { Msg, UnitState } from './types';
  * alors que les veilleurs que les agents écrivaient avant le cycle y apparaissaient comme jobs.
  *
  * Lecture seule de fichiers locaux, aucun appel réseau : les runs suivis et leurs liens sont
- * ceux que la veille a écrits dans `attente.suivi`. `cycleView` et `relayView` sont pures
+ * ceux que la veille a écrits dans `attente.suivi`, l'avancement du lot celui qu'elle a lu sur
+ * Trello (`avancement`). `cycleView` et `relayView` sont pures
  * (`scripts/verif-cycle-lot.mts`) ; ce module n'importe que des modules `node:` et des types.
  */
 
@@ -59,6 +60,8 @@ export type CycleView = {
   noteIsError: boolean;
   facts: CycleFact[];
   runs: CycleRun[];
+  /** cartes faites par le dev / cartes du lot ; `null` tant que le relais ne l'a pas lu */
+  progress: { done: number; total: number } | null;
 };
 
 export type RelayView = {
@@ -142,6 +145,28 @@ function cycleRuns(e: Obj): CycleRun[] {
   return out;
 }
 
+/**
+ * Avancement écrit par la veille à chaque passage : une carte est faite par le dev quand
+ * `run-lot.sh` l'a passée en Waiting for review (sa passe est poussée), ou plus loin dans le cycle ;
+ * annulée ou archivée, elle sort du total. Une lecture Trello ratée garde le dernier compte.
+ */
+function cycleProgress(e: Obj): { progress: CycleView['progress']; facts: CycleFact[] } {
+  const av = obj(e.avancement);
+  const total = num(av.total);
+  const done = num(av.faites);
+  if (total === null || done === null || total <= 0) return { progress: null, facts: [] };
+  const lists = Object.entries(obj(av.par_liste))
+    .filter(([, n]) => typeof n === 'number' && n > 0)
+    .map(([list, n]) => `${list} ${n}`)
+    .join(' · ');
+  const at = tsOf(av.heure);
+  const facts: CycleFact[] = [{ k: 'graph.f.cycleCards', v: `${done}/${total}` }];
+  if (lists) facts.push({ k: 'graph.f.cycleCardsLists', v: lists });
+  if (at !== null) facts.push({ k: 'graph.f.cycleCardsAt', v: clock(at), fmt: 'clock' });
+  if (str(av.erreur)) facts.push({ k: 'graph.f.cycleCardsError', v: str(av.erreur) });
+  return { progress: { done: Math.min(done, total), total }, facts };
+}
+
 /** Vue d'un lot ; `null` pour un état illisible ou un lot livré depuis plus de 24 h. */
 export function cycleView(etat: unknown, now: number): CycleView | null {
   const e = obj(etat);
@@ -188,10 +213,12 @@ export function cycleView(etat: unknown, now: number): CycleView | null {
     noteIsError = true;
   }
 
+  const avancement = cycleProgress(e);
   const facts: CycleFact[] = [
     { k: 'graph.f.cycleStep', v: etape },
     { k: 'graph.f.cycleHand', v: etape === 'arret' ? 'humain' : tour === 'veille' ? 'relais' : nomAgent(tour) },
     ...(since !== null ? [{ k: 'graph.f.cycleSince', v: clock(since), fmt: 'clock' as const }] : []),
+    ...avancement.facts,
     { k: 'graph.f.cycleRounds', v: rounds },
   ];
   for (const p of arr(e.prs_lot)) {
@@ -230,6 +257,7 @@ export function cycleView(etat: unknown, now: number): CycleView | null {
     noteIsError,
     facts,
     runs,
+    progress: avancement.progress,
   };
 }
 

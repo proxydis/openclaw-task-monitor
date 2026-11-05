@@ -193,6 +193,26 @@ Une fiche « en attente » ou « en cours » alors que le runner n'a plus de pro
 est affichée comme un job interrompu. `node scripts/verif-ci-local.mts` vérifie l'analyse hors
 serveur.
 
+### Cycle de lot (relais de `cycle-lot`)
+
+Quand les lots suivent le cycle développeur ↔ relecteur d'[agentic-dev](https://github.com/proxydis/agentic-dev),
+la vue Graph montre son relais sous la gateway (« Relais du cycle de lot », en échec quand son
+pouls a plus de 6 min) et un nœud par lot (« Cycle du lot 1.0.0 ») : étape, qui a la main,
+aller-retours, PR du lot et de livraison, réveil en attente, et en enfants les runs GitHub que le
+relais attend.
+
+- **Avancement du lot** : le coin haut droit du nœud du lot montre les cartes faites par le
+  développeur sur les cartes du lot (`4/22`), avec une jauge sous le titre. Une carte est faite
+  dès que `run-lot.sh` l'a passée en Waiting for review (sa passe est poussée), ou plus loin
+  (Under review, Finished). Une carte renvoyée en Work in progress au verdict repasse dans le
+  reste à faire ; annulée ou archivée, elle sort du total.
+- Le relais lit le tableau Trello à chaque passage et écrit le compte dans l'état du lot
+  (`avancement`). Le panneau ajoute le compte par liste Trello et l'heure de la lecture ; une
+  lecture ratée garde le dernier compte et affiche l'erreur.
+
+Sources : `CYCLE_LOT_CYCLES_DIR` (`<version>/etat.json`, `.veille.json`) ; le monitor lui-même ne
+fait aucun appel réseau. `node scripts/verif-cycle-lot.mts` vérifie la lecture hors serveur.
+
 ### Tâches en cours
 
 Les tours d'agent CLI ne sont écrits dans `task_runs` qu'à leur terminaison. Une tâche

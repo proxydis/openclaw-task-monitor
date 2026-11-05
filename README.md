@@ -189,6 +189,26 @@ Sources: the batch chain log (`CI : …` lines written by `ci_fin`), the runner 
 saying “queued” or “running” while the runner has no `Runner.Worker` process is shown as an
 interrupted job. `node scripts/verif-ci-local.mts` checks the parsing offline.
 
+### Batch cycle (`cycle-lot` relay)
+
+When batches follow the developer ↔ reviewer cycle of [agentic-dev](https://github.com/proxydis/agentic-dev),
+the Graph view shows its relay under the gateway (“Batch cycle relay”, failed when its heartbeat
+is older than 6 minutes) and one node per batch (“Batch 1.0.0 cycle”): step, who has the hand,
+review rounds, batch and delivery PRs, pending wake-up, and as children the GitHub runs the relay
+waits for.
+
+- **Batch progress**: the top right corner of the batch node shows the cards done by the
+  developer out of the batch cards (`4/22`), with a gauge under the title. A card is done once
+  `run-lot.sh` has moved it to Waiting for review (its pass is pushed), or further (Under review,
+  Finished). A card sent back to Work in progress at the verdict is counted as not done again;
+  a canceled or archived card leaves the total.
+- The relay reads the Trello board on each pass and writes the count into the batch state
+  (`avancement`). The panel adds the count per Trello list and the time of the reading; a failed
+  read keeps the last count and shows the error.
+
+Sources: `CYCLE_LOT_CYCLES_DIR` (`<version>/etat.json`, `.veille.json`); the monitor itself makes
+no network call. `node scripts/verif-cycle-lot.mts` checks the reading offline.
+
 ### Running tasks
 
 Agent CLI turns are only written to `task_runs` once they end. A “running” task is
