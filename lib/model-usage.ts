@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PLAN_USAGE_ENABLED } from './anthropic-usage';
 import { claudeProjectsDir } from './claude-cli';
-import type { ModelShare, ModelUsage, ModelUsageWindow, PlanUsage } from './types';
+import type { AgentShare, ModelShare, ModelUsage, ModelUsageWindow, PlanUsage } from './types';
+import type { WorkspaceAgent } from './workspaces';
 
 /**
  * Répartition de la consommation par modèle, pour l'onglet « Par modèle » de la carte du
@@ -101,16 +102,64 @@ function normModel(id: string): string {
 
 // ------------------------------------------------------------------ cumuls
 
+function costOf(price: Price, a: Float64Array): number {
+  return (a[1] * price.in + a[2] * price.out + a[3] * price.in * 1.25 + a[4] * price.in * 2 + a[5] * price.cacheRead) / 1e6;
+}
+
+/** Transcripts hors de tout workspace d'agent : `~/work/*`, `/tmp`, CLI lancé à la main… */
+export const OTHER_AGENT = '_other';
+
+/** `/home/meher/.openclaw/workspace-neo` → `-home-meher--openclaw-workspace-neo`, nom de dossier du CLI. */
+function slugOf(p: string): string {
+  return p.replace(/[^A-Za-z0-9]/g, '-');
+}
+
+type AgentSlug = { slug: string; id: string; exact: boolean };
+let agentSlugs: AgentSlug[] = [];
+let agentNames = new Map<string, string>();
+
+/**
+ * Table slug → agent, refaite à chaque cycle depuis la config. Deux familles par agent :
+ * son workspace (sous-dossiers compris, `workspace-alan-repos-…`) et `agents/<id>/`
+ * (`…-agents-ada-agent-workshop-skills`). Le workspace nommé `workspace` tout court (agent
+ * `main`) n'apparie qu'exactement : son slug est le préfixe de tous les autres, et
+ * `workspace-proxydis-website` ne lui appartient pas.
+ */
+function setAgents(agents: (WorkspaceAgent & { name?: string })[], ocHome: string): void {
+  const slugs: AgentSlug[] = [];
+  const names = new Map<string, string>();
+  for (const a of agents) {
+    names.set(a.id, a.name || a.id);
+    if (a.workspace) {
+      slugs.push({ slug: slugOf(a.workspace), id: a.id, exact: path.basename(a.workspace) === 'workspace' });
+    }
+    slugs.push({ slug: slugOf(path.join(ocHome, 'agents', a.id)), id: a.id, exact: false });
+  }
+  agentSlugs = slugs.sort((x, y) => y.slug.length - x.slug.length);
+  agentNames = names;
+}
+
+/** Agent d'un transcript, d'après le premier segment de son chemin sous `projects/`. */
+function agentOfFile(file: string): string {
+  const dir = path.relative(claudeProjectsDir(), file).split(path.sep)[0];
+  for (const a of agentSlugs) {
+    if (dir === a.slug || (!a.exact && dir.startsWith(`${a.slug}-`))) return a.id;
+  }
+  return OTHER_AGENT;
+}
+
 /** Compteurs d'une case : appels, entrée, sortie, écriture cache 5 min, 1 h, lecture cache. */
 const N = 6;
+/** case → `agent \t modèle` → compteurs ; le coût dépend du modèle, d'où la clé composée */
 const buckets = new Map<number, Map<string, Float64Array>>();
 
-function addCall(ts: number, model: string, u: any): void {
+function addCall(ts: number, agent: string, model: string, u: any): void {
   const key = Math.floor(ts / BUCKET);
   let b = buckets.get(key);
   if (!b) buckets.set(key, (b = new Map()));
-  let v = b.get(model);
-  if (!v) b.set(model, (v = new Float64Array(N)));
+  const k = `${agent}\t${model}`;
+  let v = b.get(k);
+  if (!v) b.set(k, (v = new Float64Array(N)));
   const cw = num(u.cache_creation_input_tokens);
   // ventilation par TTL quand elle existe ; sans elle, tout est compté au tarif 5 min
   const cw1h = Math.min(cw, num(u.cache_creation?.ephemeral_1h_input_tokens));
@@ -140,6 +189,8 @@ type FileState = {
   residue: Buffer;
   /** derniers `message.id` vus, dans l'ordre */
   ids: string[];
+  /** agent du transcript, figé à la découverte */
+  agent: string;
 };
 
 const files = new Map<string, FileState>();
@@ -196,7 +247,7 @@ function discover(now: number): void {
 function observe(file: string, st: fs.Stats): void {
   let s = files.get(file);
   if (!s) {
-    s = { size: 0, mtimeMs: 0, offset: 0, residue: EMPTY, ids: [] };
+    s = { size: 0, mtimeMs: 0, offset: 0, residue: EMPTY, ids: [], agent: agentOfFile(file) };
     files.set(file, s);
   }
   if (st.size < s.size) {
@@ -230,7 +281,7 @@ function consume(s: FileState, line: Buffer, minTs: number): void {
   }
   const ts = Date.parse(typeof o.timestamp === 'string' ? o.timestamp : '');
   if (!Number.isFinite(ts) || ts < minTs) return;
-  addCall(ts, normModel(model), u);
+  addCall(ts, s.agent, normModel(model), u);
 }
 
 /** Lit au plus `max` octets neufs d'un fichier ; rend le nombre d'octets consommés. */
@@ -274,8 +325,9 @@ function readFile(file: string, s: FileState, max: number, minTs: number): numbe
  * `BYTES_PER_CYCLE` octets lus, une re-découverte de l'arbre toutes les 30 s, et entre
  * deux un `stat` des seuls fichiers récemment modifiés.
  */
-export function scanModelUsage(): void {
+export function scanModelUsage(agents: (WorkspaceAgent & { name?: string })[], ocHome: string): void {
   if (!PLAN_USAGE_ENABLED) return;
+  setAgents(agents, ocHome);
   const now = Date.now();
   if (now - discoveredAt >= DISCOVER_TTL) {
     discover(now);
@@ -316,24 +368,41 @@ function windowStart(plan: PlanUsage | null, kind: string, span: number, now: nu
   return { since: now - span, aligned: false };
 }
 
-function sumSince(since: number): ModelShare[] {
+function sumSince(since: number): { models: ModelShare[]; agents: AgentShare[] } {
   const acc = new Map<string, Float64Array>();
   const min = Math.floor(since / BUCKET);
   for (const [k, b] of buckets) {
-    // case à cheval sur le début de fenêtre : comptée entière (5 min d'imprécision au plus)
     if (k < min) continue;
-    for (const [model, v] of b) {
-      let a = acc.get(model);
-      if (!a) acc.set(model, (a = new Float64Array(N)));
+    for (const [key, v] of b) {
+      let a = acc.get(key);
+      if (!a) acc.set(key, (a = new Float64Array(N)));
       for (let i = 0; i < N; i++) a[i] += v[i];
     }
   }
-  const out: ModelShare[] = [];
-  for (const [model, a] of acc) {
+  const byModel = new Map<string, Float64Array>();
+  const byAgent = new Map<string, AgentShare>();
+  for (const [key, a] of acc) {
+    const [agent, model] = key.split('\t');
+    let m = byModel.get(model);
+    if (!m) byModel.set(model, (m = new Float64Array(N)));
+    for (let i = 0; i < N; i++) m[i] += a[i];
+    let g = byAgent.get(agent);
+    if (!g) {
+      g = { agent, name: agentNames.get(agent) ?? agent, calls: 0, in: 0, out: 0, cacheWrite: 0, cacheRead: 0, cost: null, approx: false };
+      byAgent.set(agent, g);
+    }
+    g.calls += a[0];
+    g.in += a[1];
+    g.out += a[2];
+    g.cacheWrite += a[3] + a[4];
+    g.cacheRead += a[5];
     const p = priceOf(model);
-    const cost = p
-      ? (a[1] * p.price.in + a[2] * p.price.out + a[3] * p.price.in * 1.25 + a[4] * p.price.in * 2 + a[5] * p.price.cacheRead) / 1e6
-      : null;
+    if (p) g.cost = (g.cost ?? 0) + costOf(p.price, a);
+    if (!p || p.ref) g.approx = true;
+  }
+  const models: ModelShare[] = [];
+  for (const [model, a] of byModel) {
+    const p = priceOf(model);
     const share: ModelShare = {
       model,
       calls: a[0],
@@ -341,12 +410,14 @@ function sumSince(since: number): ModelShare[] {
       out: a[2],
       cacheWrite: a[3] + a[4],
       cacheRead: a[5],
-      cost,
+      cost: p ? costOf(p.price, a) : null,
     };
     if (p?.ref) share.priceRef = p.ref;
-    out.push(share);
+    models.push(share);
   }
-  return out.sort((x, y) => (y.cost ?? -1) - (x.cost ?? -1) || y.calls - x.calls);
+  const byCost = (x: { cost: number | null; calls: number }, y: { cost: number | null; calls: number }) =>
+    (y.cost ?? -1) - (x.cost ?? -1) || y.calls - x.calls;
+  return { models: models.sort(byCost), agents: [...byAgent.values()].sort(byCost) };
 }
 
 export function getModelUsage(plan: PlanUsage | null): ModelUsage | null {
@@ -359,10 +430,10 @@ export function getModelUsage(plan: PlanUsage | null): ModelUsage | null {
     done += s.offset;
   }
   const windows: ModelUsageWindow[] = [
-    { id: 'session', ...windowStart(plan, 'session', SESSION_MS, now), models: [] },
-    { id: 'weekly', ...windowStart(plan, 'weekly_all', WEEK_MS, now), models: [] },
+    { id: 'session', ...windowStart(plan, 'session', SESSION_MS, now), models: [], agents: [] },
+    { id: 'weekly', ...windowStart(plan, 'weekly_all', WEEK_MS, now), models: [], agents: [] },
   ];
-  for (const w of windows) w.models = sumSince(w.since);
+  for (const w of windows) Object.assign(w, sumSince(w.since));
   return {
     windows,
     // rien de découvert encore : 0, pas 100 — l'interface affiche « lecture en cours »

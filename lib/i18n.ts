@@ -111,6 +111,7 @@ const EN: Record<string, string> = {
   'plan.err.network': 'Anthropic API unreachable ({err})',
   'plan.tab.limits': 'Limits',
   'plan.tab.models': 'By model',
+  'plan.tab.agents': 'By agents',
   'models.win.session': 'Session (5 h)',
   'models.win.weekly': 'Week',
   'models.metric.cost': 'Cost',
@@ -127,6 +128,9 @@ const EN: Record<string, string> = {
   'models.noPrice': 'Unknown price: excluded from cost',
   'models.costNote': 'Public API price equivalent. The plan bills nothing per token, this only weighs each model.',
   'models.tip': 'input {in} · output {out} · cache write {cw} · cache read {cr} · {calls} calls',
+  'agents.chart': 'Share of consumption by agent',
+  'agents.other': 'Other (outside agent workspaces)',
+  'agents.approxCost': '≈: some models have an estimated or unknown price',
 
   // arbre
   'panel.tree': 'Agent tree',
@@ -555,6 +559,7 @@ const FR: Record<string, string> = {
   'plan.err.network': 'API Anthropic injoignable ({err})',
   'plan.tab.limits': 'Limites',
   'plan.tab.models': 'Par modèle',
+  'plan.tab.agents': 'Par agent',
   'models.win.session': 'Session (5 h)',
   'models.win.weekly': 'Semaine',
   'models.metric.cost': 'Coût',
@@ -571,6 +576,9 @@ const FR: Record<string, string> = {
   'models.noPrice': 'Tarif inconnu : exclu du coût',
   'models.costNote': 'Équivalent au tarif public de l’API. Le forfait ne facture rien au jeton, ce coût sert seulement à pondérer chaque modèle.',
   'models.tip': 'entrée {in} · sortie {out} · écriture cache {cw} · lecture cache {cr} · {calls} appels',
+  'agents.chart': 'Répartition de la consommation par agent',
+  'agents.other': 'Autres (hors workspaces d’agents)',
+  'agents.approxCost': '≈ : certains modèles ont un tarif estimé ou inconnu',
 
   'panel.tree': 'Arbre des agents',
   'tab.tree': 'Arbre',

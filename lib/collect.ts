@@ -632,7 +632,7 @@ export function collectAll(opts: { window?: number } = {}): { snapshot: Snapshot
   const cliByKey = readCliSessionKeyIndex(agentsCfg.map((a) => a.id));
   beginTokenCycle();
   // répartition par modèle : tous les transcripts de l'hôte, budget de lecture séparé
-  scanModelUsage();
+  scanModelUsage(agentsCfg, OC_HOME);
   const runtimeProcs: RuntimeProc[] = [];
   const runtimeCmds = new Map<number, string>(); // pid -> ligne de commande (effort, modèle : vue Graph)
   for (const p of procs.values()) {
