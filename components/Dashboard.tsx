@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   AgentNode,
+  AgentShare,
   ModelShare,
   ModelUsage,
   PlanLimit,
@@ -204,27 +205,31 @@ function usePersisted<T extends string>(key: string, initial: T, allowed: readon
   return [v, set] as const;
 }
 
-const PLAN_TABS = ['limits', 'models'] as const;
+const PLAN_TABS = ['limits', 'models', 'agents'] as const;
 const MODEL_WINDOWS = ['session', 'weekly'] as const;
 const MODEL_METRICS = ['cost', 'tokens'] as const;
 type ModelMetric = (typeof MODEL_METRICS)[number];
 
 /**
  * Palette catégorielle sombre (validée CVD et contraste ≥ 3:1 sur `--panel`). La couleur
- * suit le modèle, jamais son rang : les modèles connus ont une case fixe, les autres
- * prennent les cases libres par ordre alphabétique, au-delà de six tout passe en gris.
+ * suit le modèle ou l'agent, jamais son rang : les connus ont une case fixe, les autres
+ * prennent les cases libres par ordre alphabétique, au-delà tout passe en gris.
  */
-const MODEL_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300'];
+const MODEL_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9b6fe0'];
 const MODEL_OTHER = '#64748b';
 const KNOWN_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-fable-5-1'];
+const KNOWN_AGENTS = ['main', 'ada', 'alan', 'eva', 'morpheus', 'neo', 'trinity'];
+/** transcripts hors de tout workspace d'agent (`OTHER_AGENT` côté serveur) */
+const OTHER_AGENT = '_other';
 
-function modelColors(models: Iterable<string>): Map<string, string> {
+function paletteColors(ids: Iterable<string>, known: string[]): Map<string, string> {
   const out = new Map<string, string>();
   const used = new Set<number>();
   const rest: string[] = [];
-  for (const id of new Set(models)) {
-    const k = KNOWN_MODELS.indexOf(id);
-    if (k >= 0) {
+  for (const id of new Set(ids)) {
+    const k = known.indexOf(id);
+    if (id === OTHER_AGENT) out.set(id, MODEL_OTHER);
+    else if (k >= 0) {
       out.set(id, MODEL_COLORS[k]);
       used.add(k);
     } else rest.push(id);
@@ -241,11 +246,13 @@ function modelName(id: string): string {
   return `${family[0].toUpperCase()}${family.slice(1)}${ver.length ? ` ${ver.join('.')}` : ''}`;
 }
 
-function shareTokens(s: ModelShare): number {
+type Share = ModelShare | AgentShare;
+
+function shareTokens(s: Share): number {
   return s.in + s.out + s.cacheWrite + s.cacheRead;
 }
 
-function metricValue(s: ModelShare, metric: ModelMetric): number | null {
+function metricValue(s: Share, metric: ModelMetric): number | null {
   return metric === 'cost' ? s.cost : shareTokens(s);
 }
 
@@ -256,21 +263,34 @@ function arcPath(a0: number, a1: number, R: number, r: number, c: number): strin
   return `M ${pt(a0, R)} A ${R} ${R} 0 ${large} 1 ${pt(a1, R)} L ${pt(a1, r)} A ${r} ${r} 0 ${large} 0 ${pt(a0, r)} Z`;
 }
 
-function ModelUsageView({ usage }: { usage: ModelUsage | null }) {
+/**
+ * Camembert de la consommation, par modèle ou par agent. Par agent, la fenêtre est figée à
+ * la semaine : c'est la limite que les agents se partagent.
+ */
+function ModelUsageView({ usage, dim }: { usage: ModelUsage | null; dim: 'model' | 'agent' }) {
   const { lang, t: tr } = useI18n();
-  const [winId, setWinId] = usePersisted('monitor.models.window', 'weekly', MODEL_WINDOWS);
+  const [winPref, setWinId] = usePersisted('monitor.models.window', 'weekly', MODEL_WINDOWS);
   const [metric, setMetric] = usePersisted<ModelMetric>('monitor.models.metric', 'cost', MODEL_METRICS);
   const [hover, setHover] = useState<string | null>(null);
+  const byAgent = dim === 'agent';
+  const winId = byAgent ? 'weekly' : winPref;
 
   const colors = useMemo(
-    () => modelColors((usage?.windows ?? []).flatMap((w) => w.models.map((s) => s.model))),
-    [usage],
+    () =>
+      byAgent
+        ? paletteColors((usage?.windows ?? []).flatMap((w) => (w.agents ?? []).map((s) => s.agent)), KNOWN_AGENTS)
+        : paletteColors((usage?.windows ?? []).flatMap((w) => w.models.map((s) => s.model)), KNOWN_MODELS),
+    [usage, byAgent],
   );
   const win = usage?.windows.find((w) => w.id === winId) ?? null;
-  const rows = win?.models ?? [];
+  const rows: Share[] = (byAgent ? win?.agents : win?.models) ?? [];
+  const keyOf = (s: Share) => ('agent' in s ? s.agent : s.model);
+  const label = (s: Share) =>
+    'agent' in s ? (s.agent === OTHER_AGENT ? tr('agents.other') : s.name) : modelName(s.model);
+  const approx = (s: Share) => metric === 'cost' && 'agent' in s && s.approx;
   const total = rows.reduce((a, s) => a + (metricValue(s, metric) ?? 0), 0);
   const fmt = (v: number | null) => (metric === 'cost' ? usd(lang, v) : tokens(lang, v));
-  const tip = (s: ModelShare) =>
+  const tip = (s: Share) =>
     tr('models.tip', {
       in: tokensFull(lang, s.in),
       out: tokensFull(lang, s.out),
@@ -293,19 +313,21 @@ function ModelUsageView({ usage }: { usage: ModelUsage | null }) {
       acc += v;
       return { s, ratio: v / total, a0, a1: (acc / total) * 2 * Math.PI };
     });
-  const focus = hover ? rows.find((s) => s.model === hover) ?? null : null;
+  const focus = hover ? rows.find((s) => keyOf(s) === hover) ?? null : null;
   const focusV = focus ? metricValue(focus, metric) : null;
 
   return (
     <>
       <div className="models-ctl">
-        <div className="seg" role="group" aria-label={tr('models.chart')}>
-          {MODEL_WINDOWS.map((w) => (
-            <button key={w} type="button" className={`tab${winId === w ? ' on' : ''}`} onClick={() => setWinId(w)}>
-              {tr(`models.win.${w}`)}
-            </button>
-          ))}
-        </div>
+        {byAgent ? null : (
+          <div className="seg" role="group" aria-label={tr('models.chart')}>
+            {MODEL_WINDOWS.map((w) => (
+              <button key={w} type="button" className={`tab${winId === w ? ' on' : ''}`} onClick={() => setWinId(w)}>
+                {tr(`models.win.${w}`)}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="seg" role="group">
           {MODEL_METRICS.map((k) => (
             <button key={k} type="button" className={`tab${metric === k ? ' on' : ''}`} onClick={() => setMetric(k)}>
@@ -331,7 +353,7 @@ function ModelUsageView({ usage }: { usage: ModelUsage | null }) {
             height={SIZE}
             viewBox={`0 0 ${SIZE} ${SIZE}`}
             role="img"
-            aria-label={tr('models.chart')}
+            aria-label={tr(byAgent ? 'agents.chart' : 'models.chart')}
             onMouseLeave={() => setHover(null)}
           >
             {slices.length === 1 ? (
@@ -340,22 +362,22 @@ function ModelUsageView({ usage }: { usage: ModelUsage | null }) {
                 cy={C}
                 r={(R + r) / 2}
                 fill="none"
-                stroke={colors.get(slices[0].s.model)}
+                stroke={colors.get(keyOf(slices[0].s))}
                 strokeWidth={R - r}
-                onMouseEnter={() => setHover(slices[0].s.model)}
+                onMouseEnter={() => setHover(keyOf(slices[0].s))}
               >
-                <title>{`${modelName(slices[0].s.model)} · ${share(lang, 1)}\n${tip(slices[0].s)}`}</title>
+                <title>{`${label(slices[0].s)} · ${share(lang, 1)}\n${tip(slices[0].s)}`}</title>
               </circle>
             ) : (
               slices.map(({ s, ratio, a0, a1 }) => (
                 <path
-                  key={s.model}
+                  key={keyOf(s)}
                   d={arcPath(a0, a1, R, r, C)}
-                  fill={colors.get(s.model)}
-                  className={hover && hover !== s.model ? 'dim' : undefined}
-                  onMouseEnter={() => setHover(s.model)}
+                  fill={colors.get(keyOf(s))}
+                  className={hover && hover !== keyOf(s) ? 'dim' : undefined}
+                  onMouseEnter={() => setHover(keyOf(s))}
                 >
-                  <title>{`${modelName(s.model)} · ${share(lang, ratio)}\n${tip(s)}`}</title>
+                  <title>{`${label(s)} · ${share(lang, ratio)}\n${tip(s)}`}</title>
                 </path>
               ))
             )}
@@ -363,7 +385,7 @@ function ModelUsageView({ usage }: { usage: ModelUsage | null }) {
               {focus ? (focusV != null && total ? share(lang, focusV / total) : '—') : fmt(total)}
             </text>
             <text x={C} y={C + 13} className="donut-k">
-              {focus ? modelName(focus.model) : tr('models.total')}
+              {focus ? label(focus) : tr('models.total')}
             </text>
           </svg>
 
@@ -372,19 +394,22 @@ function ModelUsageView({ usage }: { usage: ModelUsage | null }) {
               const v = metricValue(s, metric);
               const note = metric === 'cost' && v == null
                 ? tr('models.noPrice')
-                : metric === 'cost' && s.priceRef
+                : metric === 'cost' && 'priceRef' in s && s.priceRef
                   ? tr('models.priceRef', { ref: modelName(s.priceRef) })
-                  : null;
+                  : approx(s)
+                    ? tr('agents.approxCost')
+                    : null;
+              const k = keyOf(s);
               return (
                 <li
-                  key={s.model}
-                  className={hover && hover !== s.model ? 'dim' : undefined}
-                  onMouseEnter={() => setHover(s.model)}
+                  key={k}
+                  className={hover && hover !== k ? 'dim' : undefined}
+                  onMouseEnter={() => setHover(k)}
                   onMouseLeave={() => setHover(null)}
                   title={`${note ? `${note}\n` : ''}${tip(s)}`}
                 >
-                  <i className="sw" style={{ background: colors.get(s.model) }} />
-                  <span className="nm">{modelName(s.model)}</span>
+                  <i className="sw" style={{ background: colors.get(k) }} />
+                  <span className="nm">{label(s)}</span>
                   <span className="pc">{v != null && total ? share(lang, v / total) : '—'}</span>
                   <span className="vl">
                     {note && v != null ? '≈ ' : ''}
@@ -403,6 +428,7 @@ function ModelUsageView({ usage }: { usage: ModelUsage | null }) {
           {' · '}
           {tr('models.calls', { n: tokensFull(lang, rows.reduce((a, s) => a + s.calls, 0)) })}
           {metric === 'cost' ? <div className="models-note">{tr('models.costNote')}</div> : null}
+          {metric === 'cost' && rows.some(approx) ? <div className="models-note">{tr('agents.approxCost')}</div> : null}
         </div>
       ) : null}
     </>
@@ -448,9 +474,9 @@ function PlanCard({
           </button>
         ))}
       </div>
-      {tab === 'models' ? (
+      {tab === 'models' || tab === 'agents' ? (
         <div className="body">
-          <ModelUsageView usage={models} />
+          <ModelUsageView usage={models} dim={tab === 'models' ? 'model' : 'agent'} />
         </div>
       ) : (
         <>
