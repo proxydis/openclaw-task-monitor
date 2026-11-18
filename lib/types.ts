@@ -218,6 +218,23 @@ export type ModelShare = {
   priceRef?: string;
 };
 
+export type AgentShare = {
+  /** id de l'agent OpenClaw, ou `_other` pour les transcripts hors de tout workspace d'agent */
+  agent: string;
+  /** nom de l'agent dans la config, sinon son id */
+  name: string;
+  /** appels API, doublons retirés */
+  calls: number;
+  in: number;
+  out: number;
+  cacheWrite: number;
+  cacheRead: number;
+  /** somme des coûts de chaque modèle employé ; `null` si aucun n'a de tarif connu */
+  cost: number | null;
+  /** au moins un modèle a un tarif emprunté ou inconnu */
+  approx: boolean;
+};
+
 export type ModelUsageWindow = {
   /** mêmes fenêtres que les limites `session` (5 h) et `weekly_all` (7 j) du forfait */
   id: 'session' | 'weekly';
@@ -227,6 +244,8 @@ export type ModelUsageWindow = {
   aligned: boolean;
   /** triés par coût décroissant */
   models: ModelShare[];
+  /** même fenêtre, ventilée par agent ; triés par coût décroissant */
+  agents: AgentShare[];
 };
 
 export type ModelUsage = {
