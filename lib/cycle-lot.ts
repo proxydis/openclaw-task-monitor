@@ -85,6 +85,10 @@ const tsOf = (v: unknown): number | null => {
 const ghUrl = (v: unknown): string | null => (typeof v === 'string' && /^https:\/\/github\.com\/[^\s"<>]+$/.test(v) ? v : null);
 const short = (sha: unknown): string => str(sha).slice(0, 7);
 const clock = (t: number | null): string => (t === null ? '' : String(t));
+const base = (p: unknown): string => str(p).split('/').filter(Boolean).at(-1) ?? '';
+
+/** Rouges de CI de suite à partir desquels le relais exige un diagnostic écrit du dev avant toute relance. */
+const DIAGNOSTIC_CI_ROUGES = 3;
 
 /** Verdict de la veille (`bilan_run`) → état d'un nœud. */
 function runState(verdict: string): UnitState {
@@ -167,6 +171,52 @@ function cycleProgress(e: Obj): { progress: CycleView['progress']; facts: CycleF
   return { progress: { done: Math.min(done, total), total }, facts };
 }
 
+/**
+ * Ce que le relais a décidé tout seul et que personne ne voit autrement : rouges de CI de suite, front qui
+ * attend le back, runs relancés en entier ou annulés (machine disparue), jobs en file signalés, réglages de
+ * déploiement passés outre, preuves en réel de chaque retour en revue. Absents tant qu'il n'y en a pas.
+ */
+function cycleRelayFacts(e: Obj, rouges: number): CycleFact[] {
+  const facts: CycleFact[] = [];
+  const rouge = obj(e.ci_rouge);
+  if (rouges > 0) {
+    facts.push({ k: 'graph.f.cycleCiRed', v: `${rouges}${str(rouge.quoi) ? ` · ${str(rouge.quoi)}` : ''}` });
+  }
+  for (const f of Object.values(obj(e.front_attend_back)).map(obj)) {
+    if (f.relance) continue;
+    facts.push({
+      k: 'graph.f.cycleFrontWaits',
+      v: `${str(f.branche)} · ${f.back_vert ? 'back vert, relance du deploy à venir' : 'back pas encore déployé'}`,
+    });
+  }
+  const entieres = Array.isArray(e.relances_entieres) ? e.relances_entieres.length : 0;
+  if (entieres > 0) facts.push({ k: 'graph.f.cycleFullReruns', v: String(entieres) });
+  const annulations = Object.values(obj(e.annulations_machine)).map(obj);
+  if (annulations.length > 0) {
+    const dernier = annulations.at(-1)!;
+    facts.push({
+      k: 'graph.f.cycleMachineCancels',
+      v: `${annulations.length}${str(dernier.motif) ? ` · ${str(dernier.motif)}` : ''}`,
+    });
+  }
+  const files = Array.isArray(e.files_signalees) ? e.files_signalees.length : 0;
+  if (files > 0) facts.push({ k: 'graph.f.cycleQueueFlags', v: String(files) });
+  const sans = obj(e.livraison_sans_reglages);
+  if (str(sans.motif)) {
+    const nums = (Array.isArray(sans.reglages) ? sans.reglages : []).map(String).join(', ');
+    facts.push({
+      k: 'graph.f.cycleNoSettings',
+      v: `${nomAgent(str(sans.par))} · ${str(sans.motif)}${nums ? ` (réglages ${nums})` : ''}`,
+    });
+  }
+  const preuve = arr(e.preuves_reel_reprises).at(-1);
+  if (preuve) {
+    const quoi = str(preuve.inchange) ? `inchangé : ${str(preuve.inchange)}` : base(preuve.fichier);
+    facts.push({ k: 'graph.f.cycleRealProofs', v: `revue ${num(preuve.revue) ?? '?'} · ${quoi}` });
+  }
+  return facts;
+}
+
 /** Vue d'un lot ; `null` pour un état illisible ou un lot livré depuis plus de 24 h. */
 export function cycleView(etat: unknown, now: number): CycleView | null {
   const e = obj(etat);
@@ -213,6 +263,13 @@ export function cycleView(etat: unknown, now: number): CycleView | null {
     noteIsError = true;
   }
 
+  // rouges de CI de suite (le compteur repart à zéro au vert de la release ou de la mise en production) :
+  // chaque rouge rend la main au dev, et à partir du 3e le relais exige un diagnostic écrit avant toute relance
+  const rouges = num(e.ci_rouges) ?? 0;
+  if (!note && rouges >= DIAGNOSTIC_CI_ROUGES && etape !== 'livre') {
+    note = { k: 'graph.cycle.ciDiagnostic', p: { n: rouges, agent: nomAgent(tour) } };
+  }
+
   const avancement = cycleProgress(e);
   const facts: CycleFact[] = [
     { k: 'graph.f.cycleStep', v: etape },
@@ -242,6 +299,7 @@ export function cycleView(etat: unknown, now: number): CycleView | null {
       v: `${nomAgent(str(dernier.agent))} · ${str(dernier.motif)} · ${dernier.ok ? 'accepté' : `échec : ${str(dernier.erreur)}`}`,
     });
   }
+  facts.push(...cycleRelayFacts(e, rouges));
   const dossierLot = str(e.dossier_lot);
   if (dossierLot) facts.push({ k: 'graph.f.cycleDir', v: dossierLot });
 
