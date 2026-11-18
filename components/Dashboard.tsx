@@ -218,7 +218,6 @@ type ModelMetric = (typeof MODEL_METRICS)[number];
 const MODEL_COLORS = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9b6fe0'];
 const MODEL_OTHER = '#64748b';
 const KNOWN_MODELS = ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-4-6', 'claude-haiku-4-5', 'claude-fable-5-1'];
-const KNOWN_AGENTS = ['main', 'ada', 'alan', 'eva', 'morpheus', 'neo', 'trinity'];
 /** transcripts hors de tout workspace d'agent (`OTHER_AGENT` côté serveur) */
 const OTHER_AGENT = '_other';
 
@@ -278,7 +277,7 @@ function ModelUsageView({ usage, dim }: { usage: ModelUsage | null; dim: 'model'
   const colors = useMemo(
     () =>
       byAgent
-        ? paletteColors((usage?.windows ?? []).flatMap((w) => (w.agents ?? []).map((s) => s.agent)), KNOWN_AGENTS)
+        ? paletteColors((usage?.windows ?? []).flatMap((w) => (w.agents ?? []).map((s) => s.agent)), [])
         : paletteColors((usage?.windows ?? []).flatMap((w) => w.models.map((s) => s.model)), KNOWN_MODELS),
     [usage, byAgent],
   );

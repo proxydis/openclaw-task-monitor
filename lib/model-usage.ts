@@ -109,7 +109,7 @@ function costOf(price: Price, a: Float64Array): number {
 /** Transcripts hors de tout workspace d'agent : `~/work/*`, `/tmp`, CLI lancé à la main… */
 export const OTHER_AGENT = '_other';
 
-/** `/home/meher/.openclaw/workspace-neo` → `-home-meher--openclaw-workspace-neo`, nom de dossier du CLI. */
+/** `/chemin/vers/workspace-agent` → `-chemin-vers-workspace-agent`, nom de dossier du CLI. */
 function slugOf(p: string): string {
   return p.replace(/[^A-Za-z0-9]/g, '-');
 }
@@ -120,10 +120,10 @@ let agentNames = new Map<string, string>();
 
 /**
  * Table slug → agent, refaite à chaque cycle depuis la config. Deux familles par agent :
- * son workspace (sous-dossiers compris, `workspace-alan-repos-…`) et `agents/<id>/`
- * (`…-agents-ada-agent-workshop-skills`). Le workspace nommé `workspace` tout court (agent
+ * son workspace (sous-dossiers compris, `workspace-<agent>-repos-…`) et `agents/<id>/`
+ * (`…-agents-<id>-agent-workshop-skills`). Le workspace nommé `workspace` tout court (agent
  * `main`) n'apparie qu'exactement : son slug est le préfixe de tous les autres, et
- * `workspace-proxydis-website` ne lui appartient pas.
+ * `workspace-site-web` ne lui appartient pas.
  */
 function setAgents(agents: (WorkspaceAgent & { name?: string })[], ocHome: string): void {
   const slugs: AgentSlug[] = [];
