@@ -263,4 +263,68 @@ check('avancement : Trello en panne, dernier compte gardé avec l’erreur ; tot
   });
 });
 
+check('rouges de CI de suite : la main au dev, diagnostic exigé à partir du 3e, rien sans rouge', () => {
+  const aucun = cycleView({ ...base, etape: 'dev', tour: 'dev', ci_rouges: 0 }, NOW)!;
+  assert.equal(aucun.note, null);
+  assert.deepEqual(fact(aucun, 'graph.f.cycleCiRed'), []);
+  const deux = cycleView(
+    { ...base, etape: 'correction', tour: 'dev', ci_rouges: 2, ci_rouge: { n: 2, origine: 'ci-release', quoi: 'CI du push sur release/1.0.0' } },
+    NOW,
+  )!;
+  assert.equal(deux.note, null);
+  assert.equal(deux.state, 'running');
+  assert.deepEqual(fact(deux, 'graph.f.cycleCiRed'), ['2 · CI du push sur release/1.0.0']);
+  const trois = cycleView(
+    { ...base, etape: 'diagnostic-deploiement', tour: 'dev', ci_rouges: 3, ci_rouge: { n: 3, origine: 'deploiement', quoi: 'CI de develop et de master (mise en production)' } },
+    NOW,
+  )!;
+  assert.equal(key(trois.note), 'graph.cycle.ciDiagnostic');
+  assert.deepEqual(params(trois.note), { n: 3, agent: 'Dev' });
+  assert.equal(trois.noteIsError, false);
+  assert.equal(key(trois.sub), 'graph.cycle.subHand');
+  assert.deepEqual(params(trois.sub), { step: 'diagnostic-deploiement', hand: 'Dev' });
+  const arret = cycleView({ ...base, etape: 'arret', tour: null, ci_rouges: 4, arret: { motif: 'ci', message: 'décision', par: 'dev' } }, NOW)!;
+  assert.equal(key(arret.note), 'graph.cycle.stopNote');
+  const livre = cycleView({ ...base, etape: 'livre', tour: null, ci_rouges: 3, depuis: '2026-11-05T08:00:00+01:00' }, NOW)!;
+  assert.equal(livre.note, null);
+});
+
+check('décisions du relais : front en attente du back, relances entières, annulations, files, réglages, preuves', () => {
+  const v = cycleView(
+    {
+      ...base,
+      etape: 'ci-livraison',
+      tour: 'veille',
+      front_attend_back: {
+        '101': { branche: 'develop', depuis: '2026-11-05T09:00:00+01:00', back_vert: null, relance: null },
+        '102': { branche: 'master', depuis: '2026-11-05T08:00:00+01:00', back_vert: '2026-11-05T08:30:00+01:00', relance: null },
+        '103': { branche: 'release/1.0.0', depuis: '2026-11-05T07:00:00+01:00', back_vert: '2026-11-05T07:10:00+01:00', relance: '2026-11-05T07:20:00+01:00' },
+      },
+      relances_entieres: ['1', '2'],
+      annulations_machine: { '3': { depot: 'back', heure: '2026-11-05T09:10:00+01:00', motif: 'jobs en file sur une machine hors ligne' } },
+      files_signalees: ['a', 'b', 'c'],
+      livraison_sans_reglages: { heure: '2026-11-05T09:20:00+01:00', par: 'dev', motif: 'réglage posé après le merge', reglages: [2, 9] },
+      preuves_reel_reprises: [
+        { fichier: '/chemin/prive/preuves-1.md', heure: '2026-11-05T05:00:00+01:00', revue: 2 },
+        { inchange: 'la reprise ne touche que la doc', heure: '2026-11-05T09:30:00+01:00', revue: 3 },
+      ],
+    },
+    NOW,
+  )!;
+  assert.deepEqual(fact(v, 'graph.f.cycleFrontWaits'), ['develop · back pas encore déployé', 'master · back vert, relance du deploy à venir']);
+  assert.deepEqual(fact(v, 'graph.f.cycleFullReruns'), ['2']);
+  assert.deepEqual(fact(v, 'graph.f.cycleMachineCancels'), ['1 · jobs en file sur une machine hors ligne']);
+  assert.deepEqual(fact(v, 'graph.f.cycleQueueFlags'), ['3']);
+  assert.deepEqual(fact(v, 'graph.f.cycleNoSettings'), ['Dev · réglage posé après le merge (réglages 2, 9)']);
+  assert.deepEqual(fact(v, 'graph.f.cycleRealProofs'), ['revue 3 · inchangé : la reprise ne touche que la doc']);
+  const fichier = cycleView({ ...base, etape: 'revue', tour: 'relecteur', preuves_reel_reprises: [{ fichier: '/chemin/prive/preuves-2.md', revue: 2 }] }, NOW)!;
+  assert.deepEqual(fact(fichier, 'graph.f.cycleRealProofs'), ['revue 2 · preuves-2.md']);
+  const rien = cycleView({ ...base, etape: 'dev', tour: 'dev' }, NOW)!;
+  for (const k of ['cycleFrontWaits', 'cycleFullReruns', 'cycleMachineCancels', 'cycleQueueFlags', 'cycleNoSettings', 'cycleRealProofs']) {
+    assert.deepEqual(fact(rien, `graph.f.${k}`), []);
+  }
+  const abime = cycleView({ ...base, etape: 'dev', tour: 'dev', front_attend_back: 'x', relances_entieres: 3, annulations_machine: [1], preuves_reel_reprises: 'x' }, NOW)!;
+  assert.deepEqual(fact(abime, 'graph.f.cycleFullReruns'), []);
+});
+
 console.log(`\n${ok} vérifications passées`);
