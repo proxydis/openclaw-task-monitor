@@ -169,6 +169,22 @@ cette session. À défaut, le `cwd` du process est comparé aux workspaces décl
 rattacher au moins l'agent. Le reste du sous-arbre de la gateway est comptabilisé comme
 « gateway », Chrome comme « navigateur ».
 
+### Voies d'un lot et preuves en réel (`run-lot.sh`, `run-reel.sh`)
+
+- **Voies** : sous l'unité d'un lot `run-lot.sh <dossier> pre|impl`, un nœud par voie (A, B, C,
+  FIN). Quand la phase FIN suit deux files parallèles, une par dépôt, les voies sont `FIN-back` et
+  `FIN-front` ; chaque passe Claude va dans la file de son dépôt.
+- **Partie mécanique de la FIN** (`fin-mecanique.sh`, sans Claude) : la voie affiche « partie
+  mécanique · passage N » (allégé compris), « en attente de celle de l'autre file », une partie
+  mécanique rouge en note (pas un échec de voie tant que la phase n'a pas fini en échec), la passe
+  de correction qui suit, et le sous-arbre de `fin-mecanique.sh` (pytest, vitest, build, e2e). Une
+  fin d'application compte pour une étape.
+- **Preuves en réel** (`run-reel.sh <dossier> [<preuves>]`) : un nœud par passe (« REEL
+  a-designations ») avec son état, son journal, sa section et ses process ; le job porte le `rc`
+  final et le fichier des preuves.
+
+`node scripts/essai-voies.mts` rejoue hors serveur de vrais journaux de chaîne et des journaux factices.
+
 ### Jobs CI du mini PC (runners auto-hébergés)
 
 Quand les runners GitHub Actions d'un lot tournent sur la machine (unités utilisateur

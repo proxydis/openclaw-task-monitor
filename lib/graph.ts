@@ -15,6 +15,20 @@ import {
   type CiStep,
 } from './ci-local';
 import { claudeProjectsDir } from './claude-cli';
+import {
+  baseStep,
+  ciLaneOf,
+  isFinLane,
+  laneOfStep,
+  mecaArgs,
+  parseLaneLines,
+  parseReelChain,
+  reelArgs,
+  stepOfLog,
+  stepOfMecaDir,
+  type LaneInfo,
+  type ReelRun,
+} from './lot-chain';
 import { RELAY_UNIT, readCycles } from './cycle-lot';
 import { unitOfPid, type RawProc } from './procs';
 import { OC_HOME, REDACT } from './store';
@@ -185,19 +199,6 @@ function resolveEfforts(nodes: GraphNode[]): void {
 // ---------------------------------------------------------------- voies d'un lot (run-lot.sh)
 
 type LotStep = { phase: string; repo: string; card: string; branch: string; trello: string | null };
-type LaneInfo = {
-  phase: string;
-  firstTs: number | null;
-  stepTs: number | null;
-  endTs: number | null;
-  step: string | null;
-  okCount: number;
-  finished: boolean;
-  failed: string;
-  stopped: boolean;
-  waiting: boolean;
-  last: string;
-};
 type LotInfo = {
   prefix: string;
   logs: string;
@@ -206,6 +207,10 @@ type LotInfo = {
   trello: Map<string, string>;
   /** étape CI qui suit la phase FIN (`ci_fin`), `null` tant qu'elle n'a pas commencé */
   ci: CiStep | null;
+  /** files parallèles de la phase FIN (`back front`), `null` en une seule file */
+  finFiles: string[] | null;
+  /** fin globale des files parallèles de la FIN */
+  finEnd: { ts: number | null; rc: number } | null;
 };
 
 const lotCache = new Map<string, { sig: string; info: LotInfo | null }>();
@@ -224,9 +229,10 @@ function readTailText(file: string, bytes: number): string {
 }
 
 /**
- * Voies A / B / FIN d'un lot lancé par `run-lot.sh <dossier> <mode>` : les deux voies sont deux
+ * Voies A / B / C / FIN d'un lot lancé par `run-lot.sh <dossier> <mode>` : les voies sont des
  * sous-shells de la même unit, indiscernables par leur ligne de commande. Leur état vit dans
- * le journal de chaîne (`[voie X]`) et dans `etapes.txt`.
+ * le journal de chaîne (`[voie X]`, analysé par `parseLaneLines`) et dans `etapes.txt`. En FIN à
+ * files parallèles, une voie par dépôt : `FIN-back`, `FIN-front`.
  */
 function readLot(lotDir: string, mode: string): LotInfo | null {
   try {
@@ -252,47 +258,49 @@ function readLot(lotDir: string, mode: string): LotInfo | null {
     let text = readTailText(chain, 400_000);
     const start = text.lastIndexOf(`##### ${prefix} ${mode} lancée`);
     if (start >= 0) text = text.slice(start);
-    const lanes = new Map<string, LaneInfo>();
-    const lane = (ph: string): LaneInfo => {
-      let x = lanes.get(ph);
-      if (!x) {
-        x = { phase: ph, firstTs: null, stepTs: null, endTs: null, step: null, okCount: 0, finished: false, failed: '', stopped: false, waiting: false, last: '' };
-        lanes.set(ph, x);
-      }
-      return x;
-    };
-    for (const line of text.split('\n')) {
-      const m = line.match(/^(\S+) \[voie (\w+)\] (.*)$/);
-      if (!m) continue;
-      const ts = Date.parse(m[1]);
-      const x = lane(m[2]);
-      const msg = m[3];
-      x.last = msg.slice(0, 240);
-      let r: RegExpMatchArray | null;
-      if ((r = msg.match(/^=== étape (\S+) : run Claude Code/))) {
-        x.step = r[1];
-        x.stepTs = Number.isFinite(ts) ? ts : null;
-        x.waiting = false;
-        if (x.firstTs === null) x.firstTs = x.stepTs;
-      } else if (/^OK étape/.test(msg)) {
-        x.okCount++;
-      } else if ((r = msg.match(/^##### phase \w+ terminée : (\d+) étapes OK, en échec :(.*)$/))) {
-        x.finished = true;
-        x.endTs = Number.isFinite(ts) ? ts : null;
-        x.okCount = Number(r[1]);
-        x.failed = /aucune/.test(r[2]) ? '' : r[2].trim();
-      } else if (/^##### phase \w+ arrêtée/.test(msg)) {
-        x.stopped = true;
-      } else if (/attente d'un créneau/.test(msg)) {
-        x.waiting = true;
-      }
-    }
-    const info: LotInfo = { prefix, logs, steps, lanes, trello, ci: parseCiChain(text, prefix) };
+    const { lanes, finFiles, finEnd } = parseLaneLines(text, steps);
+    const info: LotInfo = { prefix, logs, steps, lanes, trello, ci: parseCiChain(text, prefix), finFiles, finEnd };
     lotCache.set(chain, { sig, info });
     return info;
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------- preuves en réel (run-reel.sh)
+
+/** Où lire le journal d'une unit `run-reel.sh` : retenu pendant qu'elle tourne, pour la montrer encore une fois finie. */
+type ReelSrc = { chain: string; dir: string; proofs: string | null };
+const reelSrcByUnit = new Map<string, ReelSrc>();
+const REEL_UNITS_MAX = 50;
+const reelCache = new Map<string, { sig: string; run: ReelRun | null }>();
+
+function readReel(chain: string): ReelRun | null {
+  try {
+    const st = fs.statSync(chain);
+    const sig = `${st.mtimeMs}:${st.size}`;
+    const hit = reelCache.get(chain);
+    if (hit && hit.sig === sig) return hit.run;
+    let text = readTailText(chain, 200_000);
+    if (st.size > 200_000) text = text.slice(text.indexOf('\n') + 1);
+    const run = parseReelChain(text);
+    reelCache.set(chain, { sig, run });
+    if (reelCache.size > REEL_UNITS_MAX) reelCache.delete(reelCache.keys().next().value as string);
+    return run;
+  } catch {
+    return null;
+  }
+}
+
+/** Variable d'environnement d'un process (`/proc/<pid>/environ`), `null` si absente ou illisible. */
+function envOf(pid: number, key: string): string | null {
+  try {
+    const env = fs.readFileSync(`/proc/${pid}/environ`, 'utf8');
+    for (const kv of env.split('\0')) if (kv.startsWith(`${key}=`)) return kv.slice(key.length + 1) || null;
+  } catch {
+    /* process d'un autre utilisateur ou disparu */
+  }
+  return null;
 }
 
 const CMD_MAX = 320;
@@ -496,47 +504,79 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     return null;
   };
 
-  // pids du sous-arbre de chaque process `claude --print`, rangés par voie d'après le log de l'étape (fd 1)
-  const lanePids = (lot: LotInfo, pids: number[]): Map<string, number[]> => {
+  const isClaude = (cmd: string) => /(^|\/)claude(\s|$)/.test(cmd.split(' --')[0] ?? '');
+  const fdOut = (pid: number): string | null => {
+    try {
+      return fs.readlinkSync(`/proc/${pid}/fd/1`);
+    } catch {
+      return null;
+    }
+  };
+  /** enfants de chaque process de l'unit, et sous-arbre d'un process limité à l'unit */
+  const unitTree = (pids: number[]) => {
     const inUnit = new Set(pids);
     const kidsOf = new Map<number, number[]>();
     for (const pid of pids) {
       const pp = procs.get(pid)?.ppid;
       if (pp !== undefined) kidsOf.set(pp, [...(kidsOf.get(pp) ?? []), pid]);
     }
+    const subtree = (root: number, taken: Set<number>): number[] => {
+      const out: number[] = [];
+      const stack = [root];
+      while (stack.length) {
+        const q = stack.pop()!;
+        if (!inUnit.has(q) || taken.has(q)) continue;
+        taken.add(q);
+        out.push(q);
+        stack.push(...(kidsOf.get(q) ?? []));
+      }
+      return out;
+    };
+    // un process lancé par une passe Claude (outil, hook, question annexe) appartient à cette passe
+    const underClaude = (pid: number): boolean => {
+      for (let q = procs.get(procs.get(pid)?.ppid ?? -1); q && inUnit.has(q.pid); q = procs.get(q.ppid)) {
+        if (isClaude(q.cmd)) return true;
+      }
+      return false;
+    };
+    return { kidsOf, subtree, underClaude };
+  };
+
+  /**
+   * pids de l'unit d'un lot rangés par voie : le sous-arbre de chaque `claude --print` (voie de
+   * l'étape dont le journal est son fd 1) et celui de chaque `fin-mecanique.sh` (voie de l'étape
+   * dont il écrit les journaux, `<LOGS>/<PREFIX>-<étape>-meca`, sinon la file FIN de son dépôt).
+   */
+  const lanePids = (lot: LotInfo, pids: number[]): Map<string, number[]> => {
+    const { subtree, underClaude } = unitTree(pids);
+    const names = new Set([...lot.lanes.keys(), ...(lot.finFiles ?? []).map((r) => `FIN-${r}`)]);
     const out = new Map<string, number[]>();
+    const taken = new Set<number>();
+    const add = (lane: string, root: number) => out.set(lane, [...(out.get(lane) ?? []), ...subtree(root, taken)]);
     for (const pid of pids) {
       const p = procs.get(pid);
-      if (!p || !/(^|\/)claude(\s|$)/.test(p.cmd.split(' --')[0] ?? '') || !/--print/.test(p.cmd)) continue;
-      // un `claude --print` lancé par la passe elle-même (outil, hook, question annexe) appartient à
-      // la voie de cette passe : lui chercher sa propre voie le rangeait dans « A » faute de `-vB`
-      let nested = false;
-      for (let q = procs.get(p.ppid); q && inUnit.has(q.pid) && !nested; q = procs.get(q.ppid)) {
-        nested = /(^|\/)claude(\s|$)/.test(q.cmd.split(' --')[0] ?? '');
+      if (!p) continue;
+      const meca = mecaArgs(p.cmd);
+      if (meca && !underClaude(pid)) {
+        const step = stepOfMecaDir(meca.dir, lot.prefix);
+        const fin = names.has(`FIN-${meca.repo}`) ? `FIN-${meca.repo}` : 'FIN';
+        add((step && laneOfStep(step, lot.steps, names)) || fin, pid);
+        continue;
       }
-      if (nested) continue;
-      let phase: string | null = null;
-      try {
-        const m = fs.readlinkSync(`/proc/${pid}/fd/1`).match(/-([^-/]+)\.log$/);
-        phase = (m && lot.steps.get(m[1])?.phase) || null;
-      } catch {
-        /* pas de droit de lecture : repli sur le répertoire de travail */
-      }
-      if (!phase) {
+      if (!isClaude(p.cmd) || !/--print/.test(p.cmd) || underClaude(pid)) continue;
+      let lane: string | null = null;
+      const log = fdOut(pid);
+      const step = log ? stepOfLog(log, lot.prefix) : null;
+      if (step) lane = laneOfStep(step, lot.steps, names);
+      if (!lane) {
+        // pas de droit de lecture sur fd/1 : repli sur le répertoire de travail (worktree -vB, -vC)
         try {
-          phase = /-vB$/.test(fs.readlinkSync(`/proc/${pid}/cwd`)) ? 'B' : 'A';
+          lane = fs.readlinkSync(`/proc/${pid}/cwd`).match(/-v([BC])$/)?.[1] ?? 'A';
         } catch {
           continue;
         }
       }
-      const tree: number[] = [];
-      const walk = (q: number) => {
-        if (!inUnit.has(q) || tree.includes(q)) return;
-        tree.push(q);
-        for (const c of kidsOf.get(q) ?? []) walk(c);
-      };
-      walk(pid);
-      out.set(phase, [...(out.get(phase) ?? []), ...tree]);
+      add(lane, pid);
     }
     return out;
   };
@@ -544,12 +584,24 @@ export function buildGraph(ctx: GraphCtx): GraphData {
   const laneNodes = (lot: LotInfo, pidsByPhase: Map<string, number[]>, t: TaskNode, parentId: string): void => {
     const unitUp = t.state === 'running';
     const phases = [...new Set([...lot.lanes.keys(), ...pidsByPhase.keys()])].sort();
+    // étape CI : chaque PR sous la file FIN de son dépôt (`FIN-back`), sinon sous la première voie FIN
+    const finLanes = phases.filter(isFinLane);
+    const ciPrsOf = new Map<string, CiStep['prs']>();
+    if (lot.ci) {
+      for (const p of lot.ci.prs) {
+        const l = ciLaneOf(p.dir, finLanes);
+        if (l) ciPrsOf.set(l, [...(ciPrsOf.get(l) ?? []), p]);
+      }
+    }
     for (const ph of phases) {
-      const info = lot.lanes.get(ph);
+      const info: LaneInfo | undefined = lot.lanes.get(ph);
       const lp = pidsByPhase.get(ph) ?? [];
       const list = procsOf(lp);
       const live = lp.length > 0;
-      const st = info?.step ? lot.steps.get(info.step) : undefined;
+      const stepName = info?.step ? baseStep(info.step, lot.steps) : null;
+      const st = stepName ? lot.steps.get(stepName) : undefined;
+      const running = !info?.finished && !info?.stopped;
+      const meca = running && info?.mode === 'meca';
       const state: GraphNode['state'] = live
         ? 'running'
         : info?.finished
@@ -568,13 +620,40 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       if (card) facts.push({ k: 'graph.f.card', v: card });
       if (st?.trello) facts.push({ k: 'graph.f.trello', v: `https://trello.com/c/${st.trello}` });
       if (info) facts.push({ k: 'graph.f.stepsDone', v: String(info.okCount) });
-      if (info?.step) facts.push({ k: 'graph.f.log', v: path.join(lot.logs, `${lot.prefix}-${info.step}.log`) });
-      const claude = list.find((p) => /(^|\/)claude(\s|$)/.test(p.cmd.split(' --')[0] ?? ''));
+      if (info?.slot !== null && info?.slot !== undefined && running) facts.push({ k: 'graph.f.slot', v: String(info.slot) });
+      if (info?.mode === 'meca') {
+        if (info.mecaPass !== null) facts.push({ k: 'graph.f.mecaPass', v: `${info.mecaPass}${info.mecaLight ? ' (allégé)' : ''}` });
+        if (info.mecaDir) facts.push({ k: 'graph.f.mecaLogs', v: info.mecaDir });
+      } else if (info?.step) {
+        facts.push({ k: 'graph.f.log', v: info.log ?? path.join(lot.logs, `${lot.prefix}-${info.step}.log`) });
+      }
+      if (info?.red?.report) facts.push({ k: 'graph.f.mecaReport', v: info.red.report });
+      const claude = list.find((p) => isClaude(p.cmd));
       const what = st
         ? `${info?.step} — ${st.repo} · ${st.branch}${st.card !== '-' ? ` · carte ${st.card}` : ''}`
         : (info?.last ?? '');
-      // étape CI : la voie FIN reste en cours tant que le lanceur attend les verdicts des PR
-      const ci = ph === 'FIN' && info?.finished && !live && lot.ci ? ciLaneView(lot.ci) : null;
+      // sous-titre de l'étape en cours : partie mécanique, attente de l'autre file, passe de correction
+      const stepSub: Msg | null =
+        running && info?.mecaWait && info.step
+          ? { k: 'graph.lane.mecaWait', p: { step: info.step } }
+          : meca && info?.step
+            ? { k: info.mecaLight ? 'graph.lane.mecaLight' : 'graph.lane.meca', p: { step: info.step, pass: info.mecaPass ?? '?' } }
+            : running && info?.mode === 'claude' && info.correction !== null && stepName
+              ? { k: 'graph.lane.correction', p: { step: stepName, n: info.correction } }
+              : null;
+      // étape CI : la voie FIN qui porte des PR reste en cours tant que le lanceur attend leurs verdicts
+      const ciPrs = ciPrsOf.get(ph);
+      const ciHere = lot.ci && (ciPrs?.length || (lot.ci.noPr && ph === finLanes[0]));
+      const ciStep = ciHere && lot.ci ? { ...lot.ci, prs: ciPrs ?? [] } : null;
+      const ci = isFinLane(ph) && info?.finished && !live && ciStep ? ciLaneView(ciStep) : null;
+      const note: Msg | null = info?.failed
+        ? `échecs :${info.failed}`
+        : (ci?.note ??
+          (running && info?.red
+            ? { k: 'graph.lane.mecaRed', p: { step: info.red.step, pass: info.red.pass ?? '?', verdict: info.red.verdict } }
+            : running && info?.error
+              ? info.error
+              : null));
       const laneId = push({
         id: `l:${t.id}:${ph}`,
         parent: parentId,
@@ -582,10 +661,14 @@ export function buildGraph(ctx: GraphCtx): GraphData {
         kind: 'lane',
         // la carte n'est dans le titre que pour une passe en cours : une voie finie ou en attente
         // porte encore l'étape précédente, la montrer en titre ferait croire qu'elle y travaille
-        label: live && card ? { k: 'graph.laneCard', p: { ph, card } } : { k: 'graph.lane', p: { ph } },
-        sub: ci ? ci.sub : info?.finished && !live ? { k: 'graph.lane.done' } : info?.waiting && !live ? { k: 'graph.lane.waiting' } : what || null,
+        label: live && card && !meca ? { k: 'graph.laneCard', p: { ph, card } } : { k: 'graph.lane', p: { ph } },
+        sub: ci
+          ? ci.sub
+          : info?.finished && !live
+            ? { k: 'graph.lane.done' }
+            : (stepSub ?? (info?.waiting && !live ? { k: 'graph.lane.waiting' } : what || null)),
         state: ci ? ci.state : state,
-        startedAt: info?.firstTs ?? claude?.startedAt ?? null,
+        startedAt: info?.firstTs ?? claude?.startedAt ?? list[0]?.startedAt ?? null,
         endedAt: live ? null : ci ? ci.endedAt : (info?.endTs ?? null),
         model: null,
         effort: claude ? 'default' : null,
@@ -596,14 +679,15 @@ export function buildGraph(ctx: GraphCtx): GraphData {
         res: live ? resOf(list) : ZERO_RES,
         procs: list,
         facts,
-        note: info?.failed ? `échecs :${info.failed}` : (ci?.note ?? null),
+        note,
+        // un rouge de la partie mécanique n'est pas un échec de voie tant que la phase n'a pas fini en échec
         noteIsError: !!info?.failed || ci?.state === 'failed',
       });
-      if (ci && lot.ci) ciPrNodes(lot.ci, laneId);
+      if (ci && ciStep) ciPrNodes(ciStep, laneId);
     }
   };
 
-  /** Un nœud par PR du lot sous la voie FIN, avec le job du runner qui la teste quand il tourne. */
+  /** Un nœud par PR du lot sous sa voie FIN, avec le job du runner qui la teste quand il tourne. */
   const ciPrNodes = (step: CiStep, laneId: string): void => {
     for (const p of step.prs) {
       const v = ciPrView(p, step, ciRunners, now, ciOwner);
@@ -700,6 +784,106 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     });
   };
 
+  /**
+   * Unit `run-reel.sh <dossier> [<preuves>]` : son journal de chaîne (`REEL_LOGS` du lanceur,
+   * sinon `<dossier>/logs`, sinon le répertoire du journal d'une passe), et les process de
+   * chaque passe — le sous-shell lancé par le lanceur, dont le fd 1 est le journal de la passe,
+   * ou à défaut le `claude --print` qui écrit dans ce journal, avec leur sous-arbre.
+   */
+  const reelOf = (t: TaskNode, pids: number[]): { src: ReelSrc; run: ReelRun | null; passPids: Map<string, number[]> } | null => {
+    const passPids = new Map<string, number[]>();
+    const isReel = (pid: number) => !!reelArgs(procs.get(pid)?.cmd ?? '');
+    const main = pids.find((pid) => isReel(pid) && !isReel(procs.get(pid)?.ppid ?? -1));
+    let src = reelSrcByUnit.get(t.id) ?? null;
+    if (main !== undefined) {
+      const args = reelArgs(procs.get(main)!.cmd)!;
+      let cwd = '/';
+      try {
+        cwd = fs.readlinkSync(`/proc/${main}/cwd`);
+      } catch {
+        /* repli : chemin tel qu'écrit */
+      }
+      const dir = path.resolve(cwd, args.dir);
+      const kids = pids.filter((pid) => procs.get(pid)?.ppid === main);
+      const kidLogs = kids.map((pid) => fdOut(pid)).filter((f): f is string => !!f && f.endsWith('.log'));
+      const env = envOf(main, 'REEL_LOGS');
+      const candidates = [env && path.resolve(cwd, env), path.join(dir, 'logs'), kidLogs[0] && path.dirname(kidLogs[0])].filter(
+        (d): d is string => !!d,
+      );
+      const logs = candidates.find((d) => fs.existsSync(path.join(d, 'reel-chain.log'))) ?? candidates[0];
+      src = { chain: path.join(logs, 'reel-chain.log'), dir, proofs: args.proofs ? path.resolve(cwd, args.proofs) : null };
+      reelSrcByUnit.delete(t.id);
+      reelSrcByUnit.set(t.id, src);
+      if (reelSrcByUnit.size > REEL_UNITS_MAX) reelSrcByUnit.delete(reelSrcByUnit.keys().next().value as string);
+    }
+    if (!src) return null;
+    let run = readReel(src.chain);
+    // journal d'un lancement précédent : celui-ci n'a encore rien écrit
+    const t0 = t.startedAt ?? t.createdAt;
+    if (run && t0 && run.startTs !== null && run.startTs < t0 - 60_000) run = null;
+    if (run && pids.length) {
+      const { subtree, underClaude } = unitTree(pids);
+      const taken = new Set<number>();
+      const byLog = new Map(run.passes.filter((p) => p.log).map((p) => [p.log!, p.md]));
+      const add = (md: string, root: number) => passPids.set(md, [...(passPids.get(md) ?? []), ...subtree(root, taken)]);
+      for (const pid of pids.filter((q) => procs.get(q)?.ppid === main)) {
+        const md = byLog.get(fdOut(pid) ?? '');
+        if (md) add(md, pid);
+      }
+      for (const pid of pids) {
+        const p = procs.get(pid);
+        if (!p || taken.has(pid) || !isClaude(p.cmd) || !/--print/.test(p.cmd) || underClaude(pid)) continue;
+        const md = byLog.get(fdOut(pid) ?? '');
+        if (md) add(md, pid);
+      }
+    }
+    return { src, run, passPids };
+  };
+
+  const reelNodes = (reel: { run: ReelRun | null; passPids: Map<string, number[]> }, t: TaskNode, parentId: string): void => {
+    const unitUp = t.state === 'running';
+    for (const p of reel.run?.passes ?? []) {
+      const lp = reel.passPids.get(p.md) ?? [];
+      const list = procsOf(lp);
+      const live = lp.length > 0;
+      // passe « lancée » sans fin écrite alors que le lanceur est mort : interrompue
+      const state: GraphNode['state'] = live ? 'running' : p.state === 'done' ? 'done' : p.state === 'failed' ? 'failed' : unitUp ? 'running' : 'killed';
+      const claude = list.find((q) => isClaude(q.cmd));
+      const facts: GraphNode['facts'] = [{ k: 'graph.f.reelStep', v: p.md }];
+      if (p.log) facts.push({ k: 'graph.f.passLog', v: p.log });
+      if (p.section) facts.push({ k: 'graph.f.section', v: p.section });
+      push({
+        id: `l:${t.id}:reel:${p.name || 'REEL'}`,
+        parent: parentId,
+        role: 'subagent',
+        kind: 'lane',
+        label: p.name ? { k: 'graph.reel.pass', p: { name: p.name } } : 'REEL',
+        sub:
+          state === 'running'
+            ? { k: 'graph.reel.running' }
+            : state === 'done'
+              ? { k: 'graph.reel.ok' }
+              : state === 'killed'
+                ? { k: 'graph.reel.killed' }
+                : { k: 'graph.reel.failed' },
+        state,
+        startedAt: p.startTs ?? claude?.startedAt ?? null,
+        endedAt: live ? null : p.endTs,
+        model: claude ? modelOfCmd(claude.cmd) : null,
+        effort: claude ? (effortOfCmd(claude.cmd) ?? 'default') : null,
+        effortSrc: claude && !effortOfCmd(claude.cmd) ? 'default' : undefined,
+        activity: { type: 'job', text: REDACT ? null : p.md },
+        usage: live ? jobTokens(lp, procs, now) : null,
+        turnUsage: null,
+        res: live ? resOf(list) : ZERO_RES,
+        procs: list,
+        facts,
+        note: p.reason,
+        noteIsError: state === 'failed' || state === 'killed',
+      });
+    }
+  };
+
   const jobNode = (t: TaskNode, agent: AgentNode): void => {
     const sysd = t.id.startsWith('systemd:');
     const det = t.id.startsWith('detached:');
@@ -708,13 +892,32 @@ export function buildGraph(ctx: GraphCtx): GraphData {
     const list0 = procsOf(t.pids ?? []);
     const lot = sysd ? lotOfProcs(list0) : null;
     const lanes = lot ? lanePids(lot, t.pids ?? []) : null;
-    const laneSet = new Set([...(lanes?.values() ?? [])].flat());
+    const reel = sysd && !lot ? reelOf(t, t.pids ?? []) : null;
+    const laneSet = new Set([...(lanes?.values() ?? []), ...(reel?.passPids.values() ?? [])].flat());
     const list = laneSet.size ? list0.filter((p) => !laneSet.has(p.pid)) : list0;
-    const claude = list.find((p) => /(^|\/)claude(\s|$)/.test(p.cmd.split(' --')[0] ?? ''));
+    const claude = list.find((p) => isClaude(p.cmd));
     const facts: GraphNode['facts'] = [];
     if (sysd) facts.push({ k: 'graph.f.unit', v: t.id.slice('systemd:'.length) });
     if (det) facts.push({ k: 'graph.f.pid', v: t.id.slice('detached:'.length) });
     if (t.kind === 'cron') facts.push({ k: 'graph.f.schedule', v: '' });
+    let note: Msg | null = t.error ?? t.summary;
+    let noteIsError = !!t.error;
+    if (reel) {
+      const run = reel.run;
+      facts.push({ k: 'graph.f.chainLog', v: reel.src.chain });
+      const proofs = run?.proofs ?? reel.src.proofs;
+      if (proofs) facts.push({ k: 'graph.f.proofs', v: proofs });
+      if (run?.end) facts.push({ k: 'graph.f.rc', v: String(run.end.rc) });
+      if (run?.abort) {
+        note = { k: 'graph.reel.abort', p: { msg: run.abort } };
+        noteIsError = true;
+      } else if (run?.end) {
+        note = { k: 'graph.reel.end', p: { rc: run.end.rc, ok: run.passes.filter((p) => p.state === 'done').length, n: run.passes.length } };
+        noteIsError = run.end.rc !== 0;
+      } else if (run && live) {
+        note = { k: 'graph.reel.progress', p: { ok: run.passes.filter((p) => p.state !== 'running').length, n: run.passes.length } };
+      }
+    }
     push({
       id: `j:${t.id}`,
       parent: `a:${agent.id}`,
@@ -734,10 +937,11 @@ export function buildGraph(ctx: GraphCtx): GraphData {
       res: live ? resOf(list) : ZERO_RES,
       procs: list,
       facts: facts.filter((f) => f.v !== ''),
-      note: t.error ?? t.summary,
-      noteIsError: !!t.error,
+      note,
+      noteIsError,
     });
     if (lot) laneNodes(lot, lanes ?? new Map(), t, `j:${t.id}`);
+    if (reel) reelNodes(reel, t, `j:${t.id}`);
   };
 
   const sessionNode = (s: SessionNode, agent: AgentNode, parentId: string): void => {
