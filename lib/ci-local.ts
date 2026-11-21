@@ -63,7 +63,9 @@ const tsOf = (s: string): number | null => {
  * `readLot`). L'étape commence après la dernière ligne `##### phase FIN terminée` quand il y
  * en a une (sinon au début du texte : journal d'essai du lanceur), et seules comptent les
  * lignes `CI :` sans voie ou en `[voie FIN]` : celles de `ci_pause` pendant les phases portent
- * `[voie A|B|FIN]` et précèdent la fin de FIN. `null` tant que l'étape n'a pas commencé.
+ * `[voie A|B|C|FIN|FIN-back|FIN-front]` et précèdent la fin de FIN. En files parallèles, la fin
+ * est la ligne sans voie `##### phase FIN terminée (files parallèles), rc=N` (celles des files,
+ * `##### phase FIN-back terminée`, ne la contiennent pas). `null` tant que l'étape n'a pas commencé.
  */
 export function parseCiChain(text: string, prefix?: string): CiStep | null {
   let body = text;

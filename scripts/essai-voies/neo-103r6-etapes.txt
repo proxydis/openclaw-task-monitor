@@ -1,0 +1,6 @@
+# Reprise r6 du lot 1.0.3 : écarts des preuves en réel de la r5 (back seulement), avant la revue 3.
+R02n A back 02 feat/1.0.3-lot release/1.0.3
+R22cal A back 22 feat/1.0.3-lot release/1.0.3
+R22f2 A back 22 feat/1.0.3-lot release/1.0.3
+# R22f (voie C) en échec de préparation : feat/1.0.3-lot-vC tenue par le worktree du lot 1.0.3 initial ; refaite en R22f2, voie A
+FINB FIN back - feat/1.0.3-lot release/1.0.3

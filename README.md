@@ -166,6 +166,21 @@ session. Failing that, the process `cwd` is compared to the declared workspaces 
 attach the agent. The rest of the gateway subtree is accounted as “gateway”, Chrome as
 “browser”.
 
+### Batch lanes and real-world proofs (`run-lot.sh`, `run-reel.sh`)
+
+- **Lanes**: under the unit of a `run-lot.sh <dir> pre|impl` batch, one node per lane (A, B, C,
+  FIN). When the FIN phase runs as two parallel queues, one per repository, the lanes are
+  `FIN-back` and `FIN-front`; each Claude pass goes to the queue of its repository.
+- **Mechanical part of FIN** (`fin-mecanique.sh`, no Claude): the lane shows “mechanical part ·
+  pass N” (light pass included), “waiting for the other queue”, a red mechanical part as a note
+  (not a lane failure until the phase ends failed), the fix pass that follows, and the
+  `fin-mecanique.sh` subtree (pytest, vitest, build, e2e). An application end counts as one step.
+- **Real-world proofs** (`run-reel.sh <dir> [<proofs>]`): one node per pass (“REEL
+  a-designations”) with its state, log, section and processes; the job carries the final `rc`
+  and the proofs file.
+
+`node scripts/essai-voies.mts` replays real and synthetic chain logs offline.
+
 ### Local CI jobs (self-hosted runners)
 
 When the GitHub Actions runners of a batch run on this machine (`gh-runner-*.service` user
