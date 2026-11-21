@@ -1,0 +1,70 @@
+2026-11-20T19:52:16+01:00 ##### neo-103r6 impl lancée (lot /home/user/.openclaw/workspace-neo/prompts/103r6, 3 créneaux Claude)
+2026-11-20T19:52:17+01:00 reprise (back) : tête d'avant c55157f8, la relecture de fin se limite au diff depuis cette tête (REPRISE_DEPUIS_BACK=- dans lot.conf pour relire tout le lot)
+2026-11-20T19:52:17+01:00 reprise (front) : tête d'avant 9ea69c08, la relecture de fin se limite au diff depuis cette tête (REPRISE_DEPUIS_FRONT=- dans lot.conf pour relire tout le lot)
+2026-11-20T19:52:18+01:00 Trello : carte 22 (E6gTVHok) en Work in progress
+2026-11-20T19:52:22+01:00 [voie B] ##### phase B terminée : 0 étapes OK, en échec : aucune
+2026-11-20T19:52:22+01:00 [voie A] attente mémoire : 2151 Mio (seuil 2560)
+2026-11-20T19:52:23+01:00 [voie A] attente d'un créneau Claude (0 job(s) lourd(s) extérieur(s), 3 créneaux)
+2026-11-20T19:52:25+01:00 [voie C] worktree /home/user/.openclaw/workspace-neo/phenix-back-wt-neo-103r6-vC créé
+2026-11-20T19:52:26+01:00 [voie C] attente mémoire : 2236 Mio (seuil 2560)
+2026-11-20T19:52:26+01:00 [voie C] attente d'un créneau Claude (0 job(s) lourd(s) extérieur(s), 3 créneaux)
+2026-11-20T20:02:23+01:00 [voie A] attente mémoire : 2297 Mio (seuil 2560)
+2026-11-20T20:02:26+01:00 [voie C] attente mémoire : 2291 Mio (seuil 2560)
+2026-11-20T20:07:23+01:00 [voie A] attente d'un créneau Claude (0 job(s) lourd(s) extérieur(s), 3 créneaux)
+2026-11-20T20:07:27+01:00 [voie C] attente d'un créneau Claude (0 job(s) lourd(s) extérieur(s), 3 créneaux)
+2026-11-20T20:12:23+01:00 [voie A] attente mémoire : 2410 Mio (seuil 2560)
+2026-11-20T20:12:27+01:00 [voie C] attente mémoire : 2402 Mio (seuil 2560)
+2026-11-20T20:22:23+01:00 [voie A] attente mémoire : 2435 Mio (seuil 2560)
+2026-11-20T20:22:23+01:00 [voie A] attente d'un créneau Claude (0 job(s) lourd(s) extérieur(s), 3 créneaux)
+2026-11-20T20:22:27+01:00 [voie C] attente mémoire : 2447 Mio (seuil 2560)
+2026-11-20T20:22:27+01:00 [voie C] attente d'un créneau Claude (0 job(s) lourd(s) extérieur(s), 3 créneaux)
+2026-11-20T20:32:24+01:00 [voie A] attente mémoire : 2516 Mio (seuil 2560)
+2026-11-20T20:32:27+01:00 [voie C] attente mémoire : 2393 Mio (seuil 2560)
+2026-11-20T20:36:24+01:00 [voie A] créneau 1 pris, mémoire OK : 2968 Mio
+2026-11-20T20:36:24+01:00 [voie A] === étape R02n (A, back, feat/1.0.3-lot) : préparation (essai 1)
+2026-11-20T20:36:26+01:00 [voie A] === étape R02n : run Claude Code, créneau 1, 4 workers (log /home/user/.openclaw/workspace-neo/logs/neo-103r6-R02n.log)
+2026-11-20T20:36:27+01:00 [voie C] créneau 2 pris, mémoire OK : 2637 Mio
+2026-11-20T20:36:27+01:00 [voie C] === étape R22f (C, back, feat/1.0.3-lot-vC) : préparation (essai 1)
+fatal: 'feat/1.0.3-lot-vC' is already used by worktree at '/home/user/.openclaw/workspace-neo/phenix-back-wt-neo-103-vC'
+2026-11-20T20:36:30+01:00 [voie C] ÉCHEC préparation R22f
+2026-11-20T20:36:33+01:00 [voie C] ##### étape R22f en échec, la phase continue
+2026-11-20T20:36:33+01:00 [voie C] ##### phase C terminée : 0 étapes OK, en échec : R22f
+2026-11-20T21:00:03+01:00 [voie A] OK étape R02n : back feat/1.0.3-lot poussée en 9fc0ee6 (1415s)
+2026-11-20T21:00:04+01:00 [voie A] Trello : carte 02 (p8eypeG7) en Waiting for review
+2026-11-20T21:00:08+01:00 [voie A] créneau 1 pris, mémoire OK : 3381 Mio
+2026-11-20T21:00:08+01:00 [voie A] === étape R22cal (A, back, feat/1.0.3-lot) : préparation (essai 1)
+2026-11-20T21:00:10+01:00 [voie A] === étape R22cal : run Claude Code, créneau 1, 4 workers (log /home/user/.openclaw/workspace-neo/logs/neo-103r6-R22cal.log)
+2026-11-20T21:21:20+01:00 [voie A] OK étape R22cal : back feat/1.0.3-lot poussée en 9dff02a (1269s)
+2026-11-20T21:21:21+01:00 [voie A] Trello : carte 22 (E6gTVHok) en Waiting for review
+2026-11-20T21:21:25+01:00 [voie A] créneau 1 pris, mémoire OK : 5720 Mio
+2026-11-20T21:21:26+01:00 [voie A] Trello : carte 22 (E6gTVHok) en Work in progress
+2026-11-20T21:21:26+01:00 [voie A] === étape R22f2 (A, back, feat/1.0.3-lot) : préparation (essai 1)
+2026-11-20T21:21:27+01:00 [voie A] === étape R22f2 : run Claude Code, créneau 1, 4 workers (log /home/user/.openclaw/workspace-neo/logs/neo-103r6-R22f2.log)
+2026-11-20T21:35:04+01:00 [voie A] OK étape R22f2 : back feat/1.0.3-lot poussée en c113330 (816s)
+2026-11-20T21:35:05+01:00 [voie A] Trello : carte 22 (E6gTVHok) en Waiting for review
+2026-11-20T21:35:09+01:00 [voie A] ##### phase A terminée : 3 étapes OK, en échec : aucune
+2026-11-20T21:35:09+01:00 ##### voies terminées : A rc=0, B rc=0, C rc=1
+2026-11-20T21:35:09+01:00 [voie FIN] créneau 1 pris, mémoire OK : 5468 Mio
+2026-11-20T21:35:09+01:00 [voie FIN] === étape FINB (FIN, back, feat/1.0.3-lot) : préparation (essai 1)
+2026-11-20T21:35:11+01:00 [voie FIN] === étape FINB : run Claude Code, créneau 1, 4 workers (log /home/user/.openclaw/workspace-neo/logs/neo-103r6-FINB.log)
+2026-11-20T22:00:01+01:00 [voie FIN] OK étape FINB : back feat/1.0.3-lot poussée en 8abf7fa (1489s)
+2026-11-20T22:00:01+01:00 [voie FIN] créneau 1 pris, mémoire OK : 5669 Mio
+2026-11-20T22:00:03+01:00 [voie FIN] === étape FINB : partie mécanique sans Claude (back, feat/1.0.3-lot, 4 workers, créneau 1, passage 1, journaux /home/user/.openclaw/workspace-neo/logs/neo-103r6-FINB-meca)
+2026-11-20T22:31:26+01:00 [voie FIN] OK étape FINB : partie mécanique verte sur 8abf7fa2 (1883s)
+2026-11-20T22:31:30+01:00 [voie FIN] ##### phase FIN terminée : 1 étapes OK, en échec : aucune
+2026-11-20T22:31:34+01:00 CI : étiquette ci-en-pause retirée de la PR 312, sans relance
+2026-11-20T22:31:34+01:00 ##### neo-103r6 terminé : A rc=0, B rc=0, C rc=1, FIN rc=0, CI rc=1
+2026-11-20T22:31:52+01:00 ##### neo-103r6 impl lancée (lot /home/user/.openclaw/workspace-neo/prompts/103r6, 3 créneaux Claude)
+2026-11-20T22:31:52+01:00 reprise (back) : tête d'avant c55157f8, la relecture de fin se limite au diff depuis cette tête (REPRISE_DEPUIS_BACK=- dans lot.conf pour relire tout le lot)
+2026-11-20T22:31:52+01:00 reprise (front) : tête d'avant 9ea69c08, la relecture de fin se limite au diff depuis cette tête (REPRISE_DEPUIS_FRONT=- dans lot.conf pour relire tout le lot)
+2026-11-20T22:31:52+01:00 Trello : carte 02 (p8eypeG7) en Work in progress
+2026-11-20T22:31:53+01:00 Trello : carte 22 (E6gTVHok) en Work in progress
+2026-11-20T22:31:57+01:00 [voie B] ##### phase B terminée : 0 étapes OK, en échec : aucune
+2026-11-20T22:31:57+01:00 [voie A] ##### phase A terminée : 0 étapes OK, en échec : aucune
+2026-11-20T22:31:57+01:00 ##### voies terminées : A rc=0, B rc=0
+2026-11-20T22:31:57+01:00 [voie FIN] ##### phase FIN terminée : 0 étapes OK, en échec : aucune
+2026-11-20T22:31:59+01:00 Trello : carte 02 (p8eypeG7) en Waiting for review
+2026-11-20T22:31:59+01:00 Trello : carte 22 (E6gTVHok) en Waiting for review
+2026-11-20T22:32:07+01:00 CI : PR 312 (phenix-back) rouverte sans ci-en-pause, run attendu
+2026-11-20T22:53:38+01:00 CI : PR 312 (phenix-back) : success, run 44821175528
+2026-11-20T22:53:38+01:00 ##### neo-103r6 terminé : A rc=0, B rc=0, FIN rc=0, CI rc=0

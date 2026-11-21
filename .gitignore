@@ -4,3 +4,6 @@ node_modules/
 *.log
 .env*
 .DS_Store
+
+# Journaux de chaîne lus par scripts/essai-voies.mts (essai du graph) : versionnés
+!scripts/essai-voies/*.log
