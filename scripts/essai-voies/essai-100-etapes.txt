@@ -1,0 +1,8 @@
+P1 PRE back - etude/1.0.0 release/1.0.0
+A1 A back 1 feat/1.0.0-lot release/1.0.0
+B1 B front 2 feat/1.0.0-lot release/1.0.0
+C1 C back 4 feat/1.0.0-lot-vC release/1.0.0
+FUSIONC FIN back - feat/1.0.0-lot feat/1.0.0-lot-vC
+R3 FIN back 3 feat/1.0.0-lot release/1.0.0
+FINB FIN back - feat/1.0.0-lot release/1.0.0
+FINF FIN front - feat/1.0.0-lot release/1.0.0
