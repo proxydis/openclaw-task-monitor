@@ -1,0 +1,28 @@
+2026-11-21T00:56:11+01:00 ##### essai-100r1 impl lancée (lot /tmp/essai-run-lot/lot-r1, 12 créneaux Claude)
+2026-11-21T00:56:11+01:00 reprise (back) : tête d'avant 035eac8d5, la relecture de fin se limite au diff depuis cette tête (REPRISE_DEPUIS_BACK=- dans lot.conf pour relire tout le lot)
+2026-11-21T00:56:11+01:00 reprise (front) : tête d'avant b9af1e073, la relecture de fin se limite au diff depuis cette tête (REPRISE_DEPUIS_FRONT=- dans lot.conf pour relire tout le lot)
+2026-11-21T00:56:11+01:00 Trello : carte 1 (k1) en Work in progress
+2026-11-21T00:56:11+01:00 Trello : carte 2 (k2) en Work in progress
+2026-11-21T00:56:11+01:00 [voie A] créneau 1 pris, mémoire OK : 5397 Mio
+2026-11-21T00:56:11+01:00 [voie B] créneau 2 pris, mémoire OK : 5396 Mio
+2026-11-21T00:56:11+01:00 [voie A] === étape RA (A, back, feat/1.0.0-lot) : préparation (essai 1)
+2026-11-21T00:56:11+01:00 [voie B] === étape RB (B, front, feat/1.0.0-lot) : préparation (essai 1)
+2026-11-21T00:56:11+01:00 [voie B] === étape RB : run Claude Code, créneau 2, 4 workers (log /tmp/essai-run-lot/logs/essai-100r1-RB.log)
+2026-11-21T00:56:11+01:00 [voie A] === étape RA : run Claude Code, créneau 1, 4 workers (log /tmp/essai-run-lot/logs/essai-100r1-RA.log)
+2026-11-21T00:56:11+01:00 [voie B] OK étape RB : front feat/1.0.0-lot poussée en 0690284 (0s)
+2026-11-21T00:56:11+01:00 [voie A] OK étape RA : back feat/1.0.0-lot poussée en c36d9f3 (0s)
+2026-11-21T00:56:11+01:00 [voie B] Trello : carte 2 (k2) en Waiting for review
+2026-11-21T00:56:11+01:00 [voie A] Trello : carte 1 (k1) en Waiting for review
+2026-11-21T00:56:11+01:00 [voie B] ##### phase B terminée : 1 étapes OK, en échec : aucune
+2026-11-21T00:56:12+01:00 [voie A] ##### phase A terminée : 1 étapes OK, en échec : aucune
+2026-11-21T00:56:12+01:00 ##### voies terminées : A rc=0, B rc=0
+2026-11-21T00:56:12+01:00 [voie FIN] créneau 1 pris, mémoire OK : 5387 Mio
+2026-11-21T00:56:12+01:00 [voie FIN] === étape FINB (FIN, back, feat/1.0.0-lot) : préparation (essai 1)
+2026-11-21T00:56:12+01:00 [voie FIN] === étape FINB : run Claude Code, créneau 1, 4 workers (log /tmp/essai-run-lot/logs/essai-100r1-FINB.log)
+2026-11-21T00:56:12+01:00 [voie FIN] OK étape FINB : back feat/1.0.0-lot poussée en c36d9f3 (0s)
+2026-11-21T00:56:12+01:00 [voie FIN] ##### phase FIN terminée : 1 étapes OK, en échec : aucune
+2026-11-21T00:56:12+01:00 CI : PR 2 (back) rouverte sans ci-en-pause, run attendu
+2026-11-21T00:56:12+01:00 CI : PR 1 (front) rouverte sans ci-en-pause, run attendu
+2026-11-21T00:57:12+01:00 CI : PR 2 (back) : success, run 102
+2026-11-21T00:57:12+01:00 CI : PR 1 (front) : success, run 103
+2026-11-21T00:57:12+01:00 ##### essai-100r1 terminé : A rc=0, B rc=0, FIN rc=0, CI rc=0

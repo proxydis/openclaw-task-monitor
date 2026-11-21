@@ -1,0 +1,23 @@
+2026-11-20T23:04:37+01:00 ##### neo-103r7 impl lancée (lot /home/user/.openclaw/workspace-neo/prompts/103r7, 3 créneaux Claude)
+2026-11-20T23:04:38+01:00 reprise (back) : tête d'avant 8abf7fa2, la relecture de fin se limite au diff depuis cette tête (REPRISE_DEPUIS_BACK=- dans lot.conf pour relire tout le lot)
+2026-11-20T23:04:38+01:00 reprise (front) : tête d'avant 9ea69c08, la relecture de fin se limite au diff depuis cette tête (REPRISE_DEPUIS_FRONT=- dans lot.conf pour relire tout le lot)
+2026-11-20T23:04:39+01:00 Trello : carte 22 (E6gTVHok) en Work in progress
+2026-11-20T23:04:43+01:00 [voie B] ##### phase B terminée : 0 étapes OK, en échec : aucune
+2026-11-20T23:04:43+01:00 [voie A] créneau 1 pris, mémoire OK : 5905 Mio
+2026-11-20T23:04:43+01:00 [voie A] === étape R22h (A, back, feat/1.0.3-lot) : préparation (essai 1)
+2026-11-20T23:04:45+01:00 [voie A] === étape R22h : run Claude Code, créneau 1, 4 workers (log /home/user/.openclaw/workspace-neo/logs/neo-103r7-R22h.log)
+2026-11-20T23:22:26+01:00 [voie A] OK étape R22h : back feat/1.0.3-lot poussée en 77af914 (1060s)
+2026-11-20T23:22:27+01:00 [voie A] Trello : carte 22 (E6gTVHok) en Waiting for review
+2026-11-20T23:22:33+01:00 [voie A] ##### phase A terminée : 1 étapes OK, en échec : aucune
+2026-11-20T23:22:33+01:00 ##### voies terminées : A rc=0, B rc=0
+2026-11-20T23:22:33+01:00 [voie FIN] créneau 1 pris, mémoire OK : 6340 Mio
+2026-11-20T23:22:33+01:00 [voie FIN] === étape FINB (FIN, back, feat/1.0.3-lot) : préparation (essai 1)
+2026-11-20T23:22:34+01:00 [voie FIN] === étape FINB : run Claude Code, créneau 1, 4 workers (log /home/user/.openclaw/workspace-neo/logs/neo-103r7-FINB.log)
+2026-11-20T23:35:42+01:00 [voie FIN] OK étape FINB : back feat/1.0.3-lot poussée en a107ea6 (787s)
+2026-11-20T23:35:42+01:00 [voie FIN] créneau 1 pris, mémoire OK : 6530 Mio
+2026-11-20T23:35:43+01:00 [voie FIN] === étape FINB : partie mécanique sans Claude (back, feat/1.0.3-lot, 4 workers, créneau 1, passage 1, journaux /home/user/.openclaw/workspace-neo/logs/neo-103r7-FINB-meca)
+2026-11-21T00:07:12+01:00 [voie FIN] OK étape FINB : partie mécanique verte sur a107ea6a (1889s)
+2026-11-21T00:07:15+01:00 [voie FIN] ##### phase FIN terminée : 1 étapes OK, en échec : aucune
+2026-11-21T00:07:23+01:00 CI : PR 312 (phenix-back) rouverte sans ci-en-pause, run attendu
+2026-11-21T00:28:55+01:00 CI : PR 312 (phenix-back) : success, run 44834415902
+2026-11-21T00:28:55+01:00 ##### neo-103r7 terminé : A rc=0, B rc=0, FIN rc=0, CI rc=0

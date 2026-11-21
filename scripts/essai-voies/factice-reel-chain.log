@@ -1,0 +1,10 @@
+2026-11-21T11:00:00+01:00 passe step-REEL-a-x.md lancée (journal /home/user/logs/fx-reel/reel-a-x.log, section /home/user/prompts/104/reel/reel-sections/reel-a-x.md)
+2026-11-21T11:00:00+01:00 passe step-REEL-b-y.md lancée (journal /home/user/logs/fx-reel/reel-b-y.log, section /home/user/prompts/104/reel/reel-sections/reel-b-y.md)
+2026-11-21T11:09:00+01:00 OK passe step-REEL-a-x.md
+2026-11-21T11:10:00+01:00 ÉCHEC passe step-REEL-b-y.md : section /home/user/prompts/104/reel/reel-sections/reel-b-y.md absente ou vide
+2026-11-21T11:10:00+01:00 sections ajoutées à /home/user/prompts/104/reel.md
+2026-11-21T11:10:00+01:00 ##### preuves en réel terminées : rc=1
+2026-11-21T11:20:00+01:00 ABANDON : fichier des preuves absent (/home/user/prompts/104/reel-absent.md)
+2026-11-21T11:30:00+01:00 passe step-REEL-a-x.md lancée (journal /home/user/logs/fx-reel/reel-a-x.log, section /home/user/prompts/104/reel/reel-sections/reel-a-x.md)
+2026-11-21T11:30:00+01:00 passe step-REEL-b-y.md lancée (journal /home/user/logs/fx-reel/reel-b-y.log, section /home/user/prompts/104/reel/reel-sections/reel-b-y.md)
+2026-11-21T11:38:00+01:00 OK passe step-REEL-b-y.md
